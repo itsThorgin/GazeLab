@@ -1,3 +1,6 @@
+## Check out the live site here: [https://itsthorgin.github.io/GazeLab/](https://itsthorgin.github.io/GazeLab/)
+
+
 # GazeLab
 
 **GazeLab** is a one-of-a-kind (yeah, because I only made one) eye-tracking trainer for FPS gamers who want that *extra training*. Just follow your target through eight levels, purely with your eyes.
