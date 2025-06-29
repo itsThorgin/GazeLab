@@ -1,0 +1,225 @@
+<!--
+ * Copyright © 2025 Thorgin (on GitHub: itsThorgin). All rights reserved.
+ * This file is part of a project published for public viewing only.
+ * Reuse, modification, or redistribution is strictly prohibited.
+-->
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>GazeLab</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <!-- Controls Panel -->
+    <div id="controls">
+      <div class="meditation-row">
+        <button id="meditationToggle" onclick="toggleMeditationMode()">Enter Meditation Mode</button>
+      </div>
+      <div class="controls-columns">
+        <!-- COLUMN 1: Display & Visuals -->
+        <div class="controls-col controls-col-visuals">
+          <label class="right-align">Screen Type:
+            <select id="screenTypeSelect" onchange="updateScreenScaling()">
+              <option value="1" selected>1080p (Full HD)</option>
+              <option value="1.33">1440p (QHD)</option>
+              <option value="2">2160p (4K)</option>
+            </select>
+          </label>
+          <div class="color-row right-align">
+            <span>Ball Color</span><input id="ballColor" type="color" value="#ff0000"/>
+          </div>
+          <div class="color-row right-align">
+            <span>Dot Color</span><input id="dotColor" type="color" value="#ffffff"/>
+          </div>
+          <div class="color-row right-align">
+            <span>Background Color</span><input id="bgColor" type="color" value="#333333"/>
+          </div>
+          <div class="color-row right-align">
+            <span>Flash Color</span><input id="flashColor" type="color" value="#aa7839"/>
+          </div>
+          <div class="checkbox-row">
+            <span>Disable flash on level change</span><input type="checkbox" id="disableFlashToggle" checked/>
+          </div>
+          <div class="checkbox-row">
+            <span>Auto Switch Level</span><input id="autoNextToggle" type="checkbox" checked/>
+          </div>
+          <div class="checkbox-row">
+            <span>Hashtag Overlay</span><input id="hashtagToggle" type="checkbox"/>
+          </div>
+          <div class="checkbox-row">
+            <span>Vertical Stripes</span><input id="verticalStripesToggle" type="checkbox"/>
+          </div>
+          <div class="checkbox-row">
+            <span>Horizontal Stripes</span><input id="horizontalStripesToggle" type="checkbox"/>
+          </div>
+          <div class="checkbox-row">
+            <span>Solid Stripes</span><input id="solidStripesToggle" type="checkbox"/>
+          </div>
+        </div>
+        <!-- COLUMN 2: Level Speeds -->
+        <div class="controls-col controls-col-levelspeeds">
+          <div class="section-label">Select difficulty</div>
+          <div class="inline-group">
+            <label>Tier:
+              <select id="tierSelect" onchange="updateLevelFromTier()">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option selected value="12">12</option>
+                <option value="13">13</option>
+                <option value="14">14</option>
+                <option value="15">15</option>
+                <option value="16">16</option>
+              </select>
+            </label>
+            <label>Sublevel:
+              <select id="subLevelInput" onchange="updateLevelFromTier()">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+              </select>
+            </label>
+
+          </div>
+          <fieldset>
+            <legend>Advanced Level Speeds (px/s)</legend>
+            <div class="level-speed-row">
+              <label for="speedLevel1">Level 1: <input id="speedLevel1" step="0.1" type="number" value="1000"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="1" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel2">Level 2: <input id="speedLevel2" step="0.1" type="number" value="1400"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="2" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel3">Level 3: <input id="speedLevel3" step="0.1" type="number" value="350"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="3" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel4">Level 4: <input id="speedLevel4" step="0.1" type="number" value="600"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="4" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel5">Level 5: <input id="speedLevel5" step="0.1" type="number" value="600"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="5" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel6">Level 6: <input id="speedLevel6" step="0.1" type="number" value="1800"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="6" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel7">Level 7: <input id="speedLevel7" step="0.1" type="number" value="400"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="7" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel8">Level 8: <input id="speedLevel8" step="0.1" type="number" value="200"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="8" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+          </fieldset>
+        </div>
+        <!-- COLUMN 3: Gameplay & Status -->
+        <div class="controls-col controls-col-gameplay">
+          <label>Speed Adjustment Increment (%):
+            <select id="speedIncrement">
+              <option value="0.5">0.5%</option>
+              <option value="1">1%</option>
+              <option selected value="2.5">2.5%</option>
+              <option value="5">5%</option>
+            </select>
+          </label>
+          <div>
+            <label>Current Level Speed (px/s):
+              <div class="speed-controls">
+                <input id="speedInput" step="0.1" type="number" value="1000"/>
+                <button onclick="changeSpeed(-1)">–</button>
+                <button onclick="changeSpeed(1)">+</button>
+              </div>
+            </label>
+          </div>
+          <div>
+            <label>Size (15-200%):
+              <div class="size-controls">
+                <input id="sizeInput" step="2.5" type="number" value="50" min="15" max="200"/>
+                <button onclick="changeSize(-2.5)">–</button>
+                <button onclick="changeSize(2.5)">+</button>
+              </div>
+            </label>
+          </div>
+          <div class="level-change-group">
+            <span id="levelDisplay">Level 1</span>
+            <button class="level-btn" onclick="prevLevel()">Previous Level</button>
+            <button class="level-btn" onclick="nextLevel()">Next Level</button>
+          </div>
+          <label>Round Duration (s) confirm with Enter:
+            <input id="roundDuration" min="1" step="1" type="number" value="30"/>
+          </label>
+          <div class="timers-group">
+            <div class="timer-row">Elapsed Time: <span id="elapsedTimeDisplay">00:00:00</span></div>
+            <div class="timer-row">Round Time: <span id="roundTimeDisplay">00:30</span></div>
+          </div>
+        </div>
+      </div>
+      <footer id="menuFooter">Made with not so much ❤️ by Thorgin &copy; 2025</footer>
+      </div>
+    </div>
+
+    <!-- Menu btn toggle -->
+    <button id="menuButton" onclick="toggleMenu()" style="position: absolute; top: 10px; right: 10px; z-index: 11;">Menu press 'm'</button>
+
+    <!-- Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- JS -->
+    <script src="main.js"></script>
+  </body>
+</html>
