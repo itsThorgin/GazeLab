@@ -1320,7 +1320,7 @@ function draw() {
     ctx.fill();
 
     // Draw central dot inside the ball
-    let dotRadius = ballRadius / 4;
+    let dotRadius = Math.max(ballRadius * 0.4, 2); // never smaller than 2px
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, dotRadius, 0, 2 * Math.PI);
     ctx.fillStyle = dotColor;
