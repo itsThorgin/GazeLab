@@ -16,7 +16,7 @@ const levelsPerTier = 10;
 const totalLevels = tiers.length * levelsPerTier;
 
 // Base speeds for each level (unscaled, for full HD)
-let baseSpeeds = [1000, 1400, 350, 600, 600, 1800, 400, 200];
+let baseSpeeds = [1000, 1000, 350, 600, 600, 1200, 400, 200];
 
 // Currently selected tier and sublevel (user selection state)
 let selectedTier = "12";
@@ -25,6 +25,10 @@ let selectedSublevel = 1;
 // Stores all calculated speeds for all levels/tiers
 let allLevelSpeeds = [];
 
+// Level 6 direction change
+let lastDirectionChangeTime = 0;
+const directionChangeCooldown = 3000; // 3 sec
+const directionChangeChance = 0.33; // % chance
 
 // Listen for screen type changes to update scaling
 // Part of: Screen scaling - updateScreenScaling function
@@ -703,6 +707,7 @@ function setupLevel6() {
     let angle = Math.random() * 2 * Math.PI;
     vel.x = baseSpeed * Math.cos(angle);
     vel.y = baseSpeed * Math.sin(angle);
+    lastDirectionChangeTime = Date.now(); // timer for movement reversal chance
 }
 
 // Sets up level 7 (clock movement)
@@ -718,7 +723,7 @@ function setupLevel7() {
     pos.x = canvas.width / 2;
     pos.y = canvas.height / 2;
     let hour;
-    // Limit repeats to at most 2
+    // Limit repeats to at most 2, so 3 occurrences in total
     do {
         hour = Math.floor(Math.random() * 12);
     } while (lastHour7 !== null && hour === lastHour7 && repeatHour7Count >= 2);
@@ -1126,6 +1131,16 @@ function update(deltaTime) {
     // Part of: Movement logic
     // ==============================
     else if (level === 6) {
+        // Check for random direction change (33% chance every 3 seconds)
+        const currentTime = Date.now();
+        if (currentTime - lastDirectionChangeTime >= directionChangeCooldown) {
+            if (Math.random() < directionChangeChance) {
+                vel.x = -vel.x;
+                vel.y = -vel.y;
+            }
+            lastDirectionChangeTime = currentTime;
+        }
+        
         // Move according to velocity vector (bouncing logic)
         pos.x += (vel.x / baseSpeed) * currentSpeed * deltaTime;
         pos.y += (vel.y / baseSpeed) * currentSpeed * deltaTime;
@@ -1205,7 +1220,16 @@ function update(deltaTime) {
         if (!clockState) {
             let hour = Math.floor(Math.random() * 12); // Pick a random hour
             let angle = (hour * Math.PI / 6) - Math.PI/2; // Convert to angle
-            let factor = 0.25 + Math.random() * 0.75; // Randomize hand length
+            let r = Math.random();
+            let factor;
+            // Randomize hand length
+            if (r < 0.45) {
+                factor = 0.25 + Math.random() * 0.10; // 25% - 35%
+            } else if (r < 0.80) {
+                factor = 0.35 + Math.random() * 0.15;  // 35% - 50%
+            } else {
+                factor = 0.5 + Math.random() * 0.25; // 50% - 75%
+            }
             let distance = factor * maxDistance;
             clockState = { phase: "outgoing", targetAngle: angle, targetDistance: distance };
         }
@@ -1246,7 +1270,14 @@ function update(deltaTime) {
                     if (Math.random() < 0.25) {
                         newDistance = clockState.targetDistance;
                     } else {
-                        newDistance = (0.25 + Math.random() * 0.75) * maxDistance;
+                        let r = Math.random();
+                        if (r < 0.45) {
+                            newDistance = (0.25 + Math.random() * 0.10) * maxDistance; // 25% - 35%
+                        } else if (r < 0.80) {
+                            newDistance = (0.35 + Math.random() * 0.15) * maxDistance; // 35% - 50%
+                        } else {
+                            newDistance = (0.5 + Math.random() * 0.25) * maxDistance; // 50% - 75%
+                        }
                     }
                 } else {
                     // Pick a new hour/angle different from previous
@@ -1257,7 +1288,14 @@ function update(deltaTime) {
                         newHour = Math.floor(Math.random() * 12);
                     } while (newHour === currentHour);
                     newAngle = (newHour * Math.PI/6) - Math.PI/2;
-                    newDistance = (0.25 + Math.random() * 0.75) * maxDistance;
+                    let r = Math.random();
+                    if (r < 0.45) {
+                        newDistance = (0.25 + Math.random() * 0.10) * maxDistance; // 25% - 35%
+                    } else if (r < 0.80) {
+                        newDistance = (0.35 + Math.random() * 0.15) * maxDistance; // 35% - 50%
+                    } else {
+                        newDistance = (0.5 + Math.random() * 0.25) * maxDistance; // 50% - 75%
+                    }
                 }
                 clockState.targetAngle = newAngle; // Set new angle
                 clockState.targetDistance = newDistance; // Set new hand length
