@@ -11,8 +11,7 @@ You’ve all heard it or said it: *“That was a headshot!”* - but no dmg or *
 
 We're here to fight those sly little shifts in your gaze - the ones tricking your brain into thinking you're dead-on target while your crosshair is a tiny bit off. GazeLab helps your eyes, brain and hands coordinate better.
 
-**Important tip:** Don’t force your eyes. Let them glide naturally after acquisition flicks. Relax your face, neck, shoulders, and arms. The goal? Keep your gaze on the center dot. At least half of your training sesh should feel smooth and effortless.
-
+**Important tip:** Don’t force your eyes. Let them glide naturally after acquisition flicks. Try to relax your face, neck, shoulders, and arms. The goal? Keep your gaze on the center dot - it should stay sharp and in focus. At slower speeds, it must be crystal clear. Your sweet spot is the tier and sublevel where you can still see the center dot without a problem, but going one level faster starts to push it out of focus. For training in Fast tiers, the dot can blur more - but never to the point it becomes just a smudge. Aim to train at a speed where the center dot stays clearly visible, even as you push into higher tiers.
 ---
 
 ## How It Helps
@@ -60,7 +59,10 @@ Press `M` or hit the button to summon the glorious, over-engineered 3-column set
 
 The idea: Train at speeds where you can confidently track the *center dot* of the target 90%+ of the time. Let your eyes glide naturally. No strain. No forcing. Use your eye muscles *as little as possible*. They *know* how to track - don’t micromanage them. Flick your sight only when switching targets or regaining lost tracking and then return to smooth, strain-free gliding.
 
-Also: occasionally train at much **slower** and **faster** speeds. Combining the slower, faster, and 'sweet spot' speeds works best for me.
+Also: occasionally train at much **slower** and **faster** speeds. A mix of slower, faster, and sweet spot speeds - split something like 20% / 20% / 60% - works best for me. Most of the time, my training looks like this:
+- 3 minutes of meditation mode - I go once through each level
+- 4 minutes of fast speed - one round of each level
+- Then 3+ rounds of sweet spot speeds
 
 ### The Levels:
 
@@ -119,4 +121,5 @@ This project is **not medical advice**. I'm not a doctor or therapist. Use commo
 - Consult a licensed healthcare professional if you have vision problems, medical conditions, or are unsure.
 
 Use at your own risk.
+
 
