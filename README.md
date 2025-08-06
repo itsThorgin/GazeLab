@@ -11,7 +11,8 @@ You’ve all heard it or said it: *“That was a headshot!”* - but no dmg or *
 
 We're here to fight those sly little shifts in your gaze - the ones tricking your brain into thinking you're dead-on target while your crosshair is a tiny bit off. GazeLab helps your eyes, brain and hands coordinate better.
 
-**Important tip:** Don’t force your eyes. Let them glide naturally after acquisition flicks. Try to relax your face, neck, shoulders, and arms. The goal? Keep your gaze on the center dot - it should stay sharp and in focus. At slower speeds, it must be crystal clear. Your sweet spot is the tier and sublevel where you can still see the center dot without a problem, but going one level faster starts to push it out of focus. For training in Fast tiers, the dot can blur more - but never to the point it becomes just a smudge. Aim to train at a speed where the center dot stays clearly visible, even as you push into higher tiers.
+**Important tip:** Don’t force your eyes. Let them glide naturally after acquisition flicks. Try to relax your face, neck, shoulders, and arms. The goal? Keep your gaze on the center dot - it should stay sharp and in focus. At slower speeds, it must be crystal clear. Your sweet spot is the tier and sublevel where you can still see the center dot without a problem, but going one level faster starts to push it out of focus. For training in Fast tiers, the dot can blur more - but never to the point it becomes just a smudge. Aim to train at a speed where the center dot stays clearly visible, even as you push into higher tiers. 
+
 ---
 
 ## How It Helps
@@ -121,5 +122,6 @@ This project is **not medical advice**. I'm not a doctor or therapist. Use commo
 - Consult a licensed healthcare professional if you have vision problems, medical conditions, or are unsure.
 
 Use at your own risk.
+
 
 
