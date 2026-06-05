@@ -54,21 +54,21 @@ body {
 
 #controls {
   position: fixed;
-  top: 2vw;
+  top: 1vh;
   left: 50%;
   transform: translateX(-50%);
   width: 96vw;
-  max-width: 1200px;
+  max-width: 1180px;
   min-width: 280px;
   z-index: 100;
   max-height: 98vh;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 10px 12px 8px 12px;
-  font-size: 1.06rem;
+  padding: 8px 12px 4px 12px;
+  font-size: 0.92rem;
   box-sizing: border-box;
   background: linear-gradient(120deg, var(--main2-light) 0%, var(--main1) 100%);
-  border-radius: 18px;
+  border-radius: 14px;
   box-shadow: var(--shadow);
   border: 1.5px solid var(--main2-dark);
   transition: width 0.2s, left 0.2s, background 0.3s;
@@ -79,7 +79,7 @@ body {
 .controls-columns {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 18px;
+  gap: 14px;
 }
 
 /* Menu Button */
@@ -166,17 +166,17 @@ body {
 /* Fieldsets, legends, and other UI highlights */
 #controls fieldset {
   background: var(--main1-dark);
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1.5px solid var(--main2-mid);
-  padding: 16px 20px;
+  padding: 8px 12px 4px 12px;
   box-shadow: 0 1px 8px 0 rgba(32,47,71,0.09);
 }
 
 #controls legend {
   color: var(--gold-light);
-  font-size: 1.09em;
+  font-size: 1em;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   letter-spacing: 0.03em;
 }
 
@@ -185,9 +185,9 @@ body {
 #controls input[type="color"],
 #controls select {
   border-radius: 7px;
-  padding: 6px 10px;
-  margin: 4px 0 10px 0;
-  font-size: 1rem;
+  padding: 4px 8px;
+  margin: 2px 0 5px 0;
+  font-size: 0.92rem;
   outline: none;
   background: var(--main1-mid);
   color: var(--text-main);
@@ -216,9 +216,9 @@ body {
   color: var(--text-main);
   border: 1.5px solid var(--gold);
   border-radius: 8px;
-  padding: 8px 18px;
-  margin: 6px 4px 14px 0;
-  font-size: 1.08rem;
+  padding: 6px 14px;
+  margin: 4px 4px 8px 0;
+  font-size: 0.98rem;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 8px 0 rgba(32,47,71,0.10);
@@ -282,11 +282,11 @@ body {
   min-width: 0;
 }
 
-/* Center align 2nd and 3rd columns in controls-columns */
+/* Center align 2nd and 3rd columns in controls columns */
 .controls-col:nth-child(2) {
   align-items: center;
 }
-/* Third column left-aligned */
+/* Third column left aligned */
 .controls-col.controls-col-gameplay {
   align-items: flex-start;
 }
@@ -295,8 +295,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  margin: 18px 0 0 0;
+  gap: 6px;
+  margin: 8px 0 0 0;
   width: 100%;
 }
 
@@ -335,7 +335,7 @@ body {
 
 /* Reduced gap */
 #controls > div, #controls > fieldset {
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 @media (max-width: 900px) {
@@ -361,7 +361,7 @@ body {
 #controls label {
   color: var(--text-secondary);
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
   font-weight: 500;
   letter-spacing: 0.02em;
 }
@@ -369,7 +369,7 @@ body {
 #controls input[type="number"],
 #controls input[type="color"],
 #controls select {
-  margin: 4px 0 10px 0;
+  margin: 2px 0 5px 0;
 }
 
 #controls button {
@@ -377,9 +377,9 @@ body {
   color: var(--text-main);
   border: 1.5px solid var(--gold);
   border-radius: 8px;
-  padding: 8px 18px;
-  margin: 6px 4px 14px 0;
-  font-size: 1.08rem;
+  padding: 6px 14px;
+  margin: 4px 4px 8px 0;
+  font-size: 0.98rem;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 8px 0 rgba(32,47,71,0.10);
@@ -401,27 +401,27 @@ body {
 
 #controls fieldset {
   background: var(--main1-dark);
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1.5px solid var(--main2-mid);
-  padding: 16px 20px;
+  padding: 8px 12px 4px 12px;
   box-shadow: 0 1px 8px 0 rgba(32,47,71,0.09);
 }
 
 #controls legend {
   color: var(--gold-light);
-  font-size: 1.09em;
+  font-size: 1em;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   letter-spacing: 0.03em;
 }
 
 #controls input[type="checkbox"] {
   margin-right: 6px;
-  transform: scale(1.2);
+  transform: scale(1.15);
 }
 
 #controls #timers div {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 #controls::-webkit-scrollbar {
@@ -429,13 +429,13 @@ body {
 }
 
 #menuFooter {
-  margin-top: 18px;
-  padding: 12px 0 6px 0;
+  margin-top: 8px;
+  padding: 5px 0 2px 0;
   border-top: 1px solid rgba(255,255,255,0.10);
   text-align: center;
   color: #aeefff;
-  font-size: 0.98em;
-  min-height: 24px;
+  font-size: 0.85em;
+  min-height: 16px;
   opacity: 0.7;
 }
 #controls::-webkit-scrollbar-thumb {
@@ -456,11 +456,30 @@ body {
 .color-row, .checkbox-row {
   display: flex;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
+}
+
+.preview-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 5px;
+}
+.preview-row span {
+  min-width: 150px;
+  display: inline-block;
+  text-align: left;
+  margin-right: 10px;
+}
+.preview-row canvas {
+  margin-left: auto;
+  width: 84px;
+  height: 84px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 6px;
 }
 
 .color-row span, .checkbox-row span {
-  min-width: 160px;
+  min-width: 150px;
   display: inline-block;
   text-align: left;
   margin-right: 10px;
@@ -476,18 +495,20 @@ body {
 }
 
 .meditation-row {
-  width: 92%;
-  margin: 0 auto 18px auto;
-  text-align: center;
-  display: block;
+  width: 100%;
+  margin: 0 auto 8px auto;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
 
 .meditation-row button {
-  width: 100%;
-  font-size: 1.13rem;
-  padding-top: 12px;
-  padding-bottom: 12px;
-  border-radius: 10px;
+  flex: 1 1 0;
+  max-width: 240px;
+  font-size: 0.95rem;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-radius: 8px;
 }
 
 .input-row {
@@ -542,12 +563,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .level-change-group #levelDisplay {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 600;
   margin-bottom: 2px;
 }
@@ -619,8 +640,8 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
-  margin-bottom: 12px;
+  margin-top: 2px;
+  margin-bottom: 6px;
 }
 
 .speed-controls input[type="number"] {
@@ -686,12 +707,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .timer-row {
-  font-size: 1.18em;
+  font-size: 1.05em;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -721,8 +742,8 @@ body {
   margin-left: auto;
   margin-right: auto;
   margin-bottom: 0;
-  gap: 10px;
-  min-height: 32px;
+  gap: 8px;
+  min-height: 26px;
 }
 
 .level-speed-row label {
@@ -733,31 +754,31 @@ body {
   margin: 0;
   padding: 0;
   text-align: left;
-  font-size: 0.97em;
-  height: 32px;
+  font-size: 0.92em;
+  height: 26px;
 }
 
 .level-speed-row input[type="number"] {
   min-width: 44px;
   max-width: 80px;
-  height: 28px;
+  height: 24px;
   box-sizing: border-box;
   vertical-align: middle;
   margin: 0 6px 0 0;
-  padding: 0;
-  font-size: 0.97em;
+  padding: 0 4px;
+  font-size: 0.92em;
   line-height: 1.05;
 }
 
 .level-speed-row .refresh-speed-btn {
-  min-width: 32px;
-  max-width: 40px;
-  width: 32px;
-  height: 32px;
+  min-width: 26px;
+  max-width: 32px;
+  width: 26px;
+  height: 26px;
   margin-left: 2px;
   margin-top: 0;
   margin-bottom: 0;
-  font-size: 0.97em;
+  font-size: 0.92em;
   line-height: 1.05;
   display: flex;
   align-items: center;
@@ -772,8 +793,8 @@ body {
 }
 
 .level-speed-row .refresh-speed-btn {
-  width: 2em;
-  height: 2em;
+  width: 1.7em;
+  height: 1.7em;
   display: flex;
   align-items: center;
   justify-content: center;
