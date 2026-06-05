@@ -30,7 +30,7 @@ Those transparent or solid overlay textures should help reduce strain and suppor
 
 Press **M** or hit the button to summon the glorious, over engineered 3 column settings menu.
 Press **Space** to pause whenever your eyes file a complaint.
-Press **←** or **→* arrow keys to navigate through levels.
+Press **←** or **→** arrow keys to navigate through levels.
 
 ### Column 1 - Display & Aesthetics
 
@@ -96,7 +96,7 @@ Activate Meditation Mode via the menu. Here's what changes:
 
 ## ABC Mode
 
-A separate toggle that ditches levels entirely and has the target *trace letters and shapes* - the full alphabet plus a couple of warm up shapes. It draws each stroke forward, reverses back over it, moves to the next, then mirrors the whole glyph before advancing. Continuous, no round timer, just vibes. +,x,A-Z without X because that is already after plus. So why keep x shape and not letter X? Shut up.
+A separate toggle that ditches levels entirely and has the target *trace letters and shapes* - the full alphabet plus a couple of warm up shapes. It draws each stroke forward, reverses back over it, then mirrors the whole glyph before advancing. Continuous, no round timer, just vibes. +,x,A-Z without X because that is already after plus. So why keep x shape and not letter X? Shut up.
 
 Fair warning: the letters are a little scuffed. They're legibleishhh. It's staying anyway.
 
