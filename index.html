@@ -16,7 +16,9 @@
     <!-- Controls Panel -->
     <div id="controls">
       <div class="meditation-row">
-        <button id="meditationToggle" onclick="toggleMeditationMode()">Enter Meditation Mode</button>
+        <button id="meditationToggle" onclick="toggleMeditationMode()">Meditation Mode</button>
+        <button id="abcToggle" onclick="toggleABCMode()">ABC Mode</button>
+        <button id="pauseToggle" onclick="togglePause()">Pause '␣'</button>
       </div>
       <div class="controls-columns">
         <!-- COLUMN 1: Display & Visuals -->
@@ -40,6 +42,10 @@
           <div class="color-row right-align">
             <span>Flash Color</span><input id="flashColor" type="color" value="#aa7839"/>
           </div>
+          <div class="preview-row">
+            <span>Preview</span>
+            <canvas id="previewCanvas" width="140" height="140"></canvas>
+          </div>
           <div class="checkbox-row">
             <span>Disable flash on level change</span><input type="checkbox" id="disableFlashToggle" checked/>
           </div>
@@ -57,6 +63,12 @@
           </div>
           <div class="checkbox-row">
             <span>Solid Stripes</span><input id="solidStripesToggle" type="checkbox"/>
+          </div>
+          <div class="checkbox-row">
+            <span>3D Depth Simulation</span><input id="depth3DToggle" type="checkbox"/>
+          </div>
+          <div class="checkbox-row">
+            <span>Reading UI Codes</span><input id="readingUIToggle" type="checkbox"/>
           </div>
         </div>
         <!-- COLUMN 2: Level Speeds -->
@@ -110,7 +122,7 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel2">Level 2: <input id="speedLevel2" step="0.1" type="number" value="1000"/></label>
+              <label for="speedLevel2">Level 2: <input id="speedLevel2" step="0.1" type="number" value="350"/></label>
               <button type="button" class="refresh-speed-btn" data-level="2" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
@@ -118,7 +130,7 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel3">Level 3: <input id="speedLevel3" step="0.1" type="number" value="350"/></label>
+              <label for="speedLevel3">Level 3: <input id="speedLevel3" step="0.1" type="number" value="600"/></label>
               <button type="button" class="refresh-speed-btn" data-level="3" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
@@ -126,7 +138,7 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel4">Level 4: <input id="speedLevel4" step="0.1" type="number" value="600"/></label>
+              <label for="speedLevel4">Level 4: <input id="speedLevel4" step="0.1" type="number" value="1200"/></label>
               <button type="button" class="refresh-speed-btn" data-level="4" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
@@ -134,7 +146,7 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel5">Level 5: <input id="speedLevel5" step="0.1" type="number" value="600"/></label>
+              <label for="speedLevel5">Level 5: <input id="speedLevel5" step="0.1" type="number" value="400"/></label>
               <button type="button" class="refresh-speed-btn" data-level="5" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
@@ -142,7 +154,7 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel6">Level 6: <input id="speedLevel6" step="0.1" type="number" value="1200"/></label>
+              <label for="speedLevel6">Level 6: <input id="speedLevel6" step="0.1" type="number" value="200"/></label>
               <button type="button" class="refresh-speed-btn" data-level="6" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
@@ -150,7 +162,7 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel7">Level 7: <input id="speedLevel7" step="0.1" type="number" value="400"/></label>
+              <label for="speedLevel7">Level 7: <input id="speedLevel7" step="0.1" type="number" value="500"/></label>
               <button type="button" class="refresh-speed-btn" data-level="7" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
@@ -158,8 +170,16 @@
               </button>
             </div>
             <div class="level-speed-row">
-              <label for="speedLevel8">Level 8: <input id="speedLevel8" step="0.1" type="number" value="200"/></label>
+              <label for="speedLevel8">Level 8: <input id="speedLevel8" step="0.1" type="number" value="700"/></label>
               <button type="button" class="refresh-speed-btn" data-level="8" title="Reset to default">
+                <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="level-speed-row">
+              <label for="speedLevel9">Level 9: <input id="speedLevel9" step="0.1" type="number" value="550"/></label>
+              <button type="button" class="refresh-speed-btn" data-level="9" title="Reset to default">
                 <svg class="refresh-svg-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                   <path d="M12 3a9 9 0 0 0-7 4V4H3v6h6V8H5a6 7 0 1 1-1 6l-1.9.3A9 9 0 1 0 12 3z"/>
                 </svg>
@@ -197,10 +217,10 @@
           </div>
           <div class="level-change-group">
             <span id="levelDisplay">Level 1</span>
-            <button class="level-btn" onclick="prevLevel()">Previous Level</button>
-            <button class="level-btn" onclick="nextLevel()">Next Level</button>
+            <button class="level-btn" onclick="prevLevel()">Previous Level<br>'←'</button>
+            <button class="level-btn" onclick="nextLevel()">Next Level<br>'→'</button>
           </div>
-          <label>Round Duration (s) confirm with Enter:
+          <label>Round Duration (s) - confirm with Enter:
             <input id="roundDuration" min="1" step="1" type="number" value="30"/>
           </label>
           <div class="timers-group">
@@ -214,7 +234,7 @@
     </div>
 
     <!-- Menu btn toggle -->
-    <button id="menuButton" onclick="toggleMenu()" style="position: absolute; top: 10px; right: 10px; z-index: 11;">Menu press 'm'</button>
+    <button id="menuButton" onclick="toggleMenu()" style="position: absolute; top: 10px; right: 10px; z-index: 11;">'M'enu</button>
 
     <!-- Canvas -->
     <canvas id="gameCanvas"></canvas>
