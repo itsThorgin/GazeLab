@@ -28,8 +28,8 @@ Those transparent or solid overlay textures should help reduce strain and suppor
 
 ## How It Works (aka The Menu)
 
-Press **M** or hit the button to summon the glorious, over engineered 3 column settings menu.
-Press **Space** to pause whenever your eyes file a complaint.
+Press **M** or hit the button to summon the glorious, over engineered 3 column settings menu.  
+Press **Space** to pause whenever your eyes file a complaint.  
 Press **←** or **→** arrow keys to navigate through levels.
 
 ### Column 1 - Display & Aesthetics
@@ -61,7 +61,7 @@ Round preset is 30 seconds, so all 9 levels = 4.5 minutes. I recommend doing 3 f
 
 **The idea:** Train at speeds where you can confidently track the center dot of the target most of the time. Let your eyes glide naturally. No strain. No forcing. Use your eye muscles as little as possible - they know how to track, don't micromanage them. Flick your sight only when switching targets or regaining lost tracking, then return to smooth, strain free gliding.
 
-Also: occasionally train at much slower and faster speeds. A mix of slower, faster, and sweet spot speeds works best for me.
+**Also:** occasionally train at much slower and faster speeds. A mix of slower, faster, and sweet spot speeds works best for me.
 
 ### The Levels:
 
@@ -124,20 +124,20 @@ Use at your own risk.
 
 Ingredients
 
-2 tbsp butter
-2 tbsp sugar
-1 tbsp cocoa powder
-2 tbsp flour
-1 tbsp milk
-Pinch of salt
-Small handful of chocolate chips
+2 tbsp butter  
+2 tbsp sugar  
+1 tbsp cocoa powder  
+2 tbsp flour  
+1 tbsp milk  
+Pinch of salt  
+Small handful of chocolate chips  
 
 Instructions
 
-Melt butter in a mug (about 20 seconds).
-Stir in sugar, cocoa, flour, salt, and milk until smooth.
-Mix in chocolate chips.
-Microwave 45-60 seconds. Stop when the top looks set but still slightly soft.
+Melt butter in a mug (about 20 seconds).  
+Stir in sugar, cocoa, flour, salt, and milk until smooth.  
+Mix in chocolate chips.  
+Microwave 45-60 seconds. Stop when the top looks set but still slightly soft.  
 
 Let it sit for about 1 minute before eating.
 
