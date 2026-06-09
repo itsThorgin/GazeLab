@@ -1577,7 +1577,7 @@ function toggleABCMode() {
         initABCMode();
     } else {
         btn.classList.remove('active');
-        btn.textContent = "Enter ABC Mode";
+        btn.textContent = "ABC Mode";
         const tierSelect = $('tierSelect');
         const subLevelInput = $('subLevelInput');
         if (tierSelect) tierSelect.disabled = false;
