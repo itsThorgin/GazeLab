@@ -142,7 +142,7 @@ resizeCanvas();
 // Current level, max level, and meditation levels
 let level = 1;
 const maxLevel = 9;
-const meditationLevels = [1, 4]; // merged axis level + advanced bounce
+const meditationLevels = [4]; // advanced bounce only
 let meditationLevelIndex = 0;
 $('levelDisplay').innerText = "Level " + level;
 
@@ -155,6 +155,12 @@ let savedColors = {};
 let savedAutoSwitch = false;
 let savedSizePercent = 50;
 let savedRoundDuration = 30;
+// Reading UI Codes, 3D depth, and stripe/hashtag overlays are forced off during
+// meditation and restored to the pre meditation state on exit
+let savedReadingUIEnabled = false;
+let saved3DEnabled = false;
+let savedOverlays = {}; // hashtag / vertical / horizontal / solid stripe toggles
+let savedFlashDisabled = false; // disableFlashToggle state, restored on exit
 
 // ----------------------------------
 // Visibility of the menu/controls toggle
@@ -392,10 +398,35 @@ speedInputs.forEach((input, index) => {
 // Breathing Timer Overlay
 // Part of: Meditation mode, Overlay
 // ==============================
-let breathPhase = 'inhale'; // Current breathing phase
-let breathTimer = 0;        // Timer for current phase
-const inhaleDuration = 4;   // Duration of inhale phase
-const exhaleDuration = 6;   // Duration of exhale phase
+// Breathing runs off a phase table so patterns can be swapped cleanly
+// Each phase has kind, duration (seconds) and the label shown on the overlay
+// relaxed = original 4-6 (longer exhale), box = 4-4-4-4 with two holds
+const BREATH_PATTERNS = {
+    relaxed: [
+        { kind: 'inhale', duration: 4, label: 'Inhale...' },
+        { kind: 'exhale', duration: 6, label: 'Exhale...' },
+    ],
+    box: [
+        { kind: 'inhale',     duration: 4, label: 'Inhale...' },
+        { kind: 'hold-full',  duration: 4, label: 'Hold...'   },
+        { kind: 'exhale',     duration: 4, label: 'Exhale...' },
+        { kind: 'hold-empty', duration: 4, label: 'Hold...'   },
+    ],
+};
+let breathPatternName = 'relaxed'; // active pattern key
+let breathPhaseIndex = 0;          // index into the active pattern array
+let breathTimer = 0;               // elapsed time in the current phase
+
+// Returns the active pattern array
+function breathPattern() {
+    return BREATH_PATTERNS[breathPatternName] || BREATH_PATTERNS.relaxed;
+}
+
+// Returns the current phase descriptor
+function currentBreathPhase() {
+    const pat = breathPattern();
+    return pat[breathPhaseIndex % pat.length];
+}
 
 // ----------------------------------
 // Updates the breathing timer and switches phases
@@ -403,12 +434,12 @@ const exhaleDuration = 6;   // Duration of exhale phase
 // ----------------------------------
 function updateBreathTimer(deltaTime) {
     breathTimer += deltaTime;
-    if (breathPhase === 'inhale' && breathTimer >= inhaleDuration) {
-        breathPhase = 'exhale';
-        breathTimer = 0;
-    } else if (breathPhase === 'exhale' && breathTimer >= exhaleDuration) {
-        breathPhase = 'inhale';
-        breathTimer = 0;
+    const phase = currentBreathPhase();
+    if (breathTimer >= phase.duration) {
+        // Carry overshoot so phase changes stay smooth across frames
+        breathTimer -= phase.duration;
+        const pat = breathPattern();
+        breathPhaseIndex = (breathPhaseIndex + 1) % pat.length;
     }
 }
 
@@ -421,39 +452,40 @@ function drawBreathingOverlay() {
 
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    let progress;
-    if (breathPhase === 'inhale') {
-        progress = breathTimer / inhaleDuration;
-    } else {
-        progress = breathTimer / exhaleDuration;
-    }
+    const phase = currentBreathPhase();
+    const progress = Math.min(1, breathTimer / phase.duration); // 0..1 within the phase
 
-    let radius;
-    if (breathPhase === 'inhale') {
-        // Inhale: grows from small to large
-        radius = 200 + 225 * progress;
-    } else {
-        // Exhale: shrinks from large to small
-        radius = 200 + 225 * (1 - progress);
+    // fullness maps the phase to circle size: 0 = smallest (empty), 1 = largest (full)
+    // holds pin to their endpoint so the circle visibly pauses during box breathing
+    const RADIUS_MIN = 200, RADIUS_MAX = 425;
+    let fullness;
+    switch (phase.kind) {
+        case 'inhale':     fullness = progress;     break; // grow
+        case 'exhale':     fullness = 1 - progress; break; // shrink
+        case 'hold-full':  fullness = 1;            break; // stay big
+        case 'hold-empty': fullness = 0;            break; // stay small
+        default:           fullness = progress;     break;
     }
-    // Handle opacity for inhale and exhale
-    let opacity;
-    if (breathPhase === 'inhale') {
-        // Inhale: lightens in the last 25%
-        if (progress > 0.75) {
-            opacity = 0.2 + 0.15 * ((progress - 0.75) / 0.25);
-        } else {
-            opacity = 0.2;
-        }
-    } else {
+    const radius = RADIUS_MIN + (RADIUS_MAX - RADIUS_MIN) * fullness;
+
+    // Opacity + color per phase, inhale/hold full use the warm tone, exhale/hold empty the dark one
+    // holds at a steady opacity so they read as a pause
+    let opacity, color;
+    if (phase.kind === 'exhale') {
         // Exhale: lightens in the last 25%
-        if (progress < 0.75) {
-            opacity = 0.3;
-        } else {
-            opacity = 0.3 - 0.175 * ((progress - 0.75) / 0.25);
-        }
+        opacity = (progress < 0.75) ? 0.3 : 0.3 - 0.175 * ((progress - 0.75) / 0.25);
+        color = '#552f00';
+    } else if (phase.kind === 'inhale') {
+        // Inhale: lightens in the last 25%
+        opacity = (progress > 0.75) ? 0.2 + 0.15 * ((progress - 0.75) / 0.25) : 0.2;
+        color = '#ffd9aa';
+    } else if (phase.kind === 'hold-full') {
+        opacity = 0.32;
+        color = '#ffd9aa';
+    } else { // hold-empty
+        opacity = 0.22;
+        color = '#552f00';
     }
-    const color = breathPhase === 'inhale' ? '#ffd9aa' : '#552f00';
 
     ctx.save();
     ctx.globalAlpha = opacity;
@@ -467,7 +499,7 @@ function drawBreathingOverlay() {
     ctx.font = 'bold 24px Arial';
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
-    ctx.fillText(breathPhase === 'inhale' ? 'Inhale...' : 'Exhale...', centerX, centerY + 8);
+    ctx.fillText(phase.label, centerX, centerY + 8);
     ctx.restore();
 }
 
@@ -749,6 +781,21 @@ document.getElementById('depth3DToggle').addEventListener('change', e => {
         depthScale = 1; // Snap back to true size when disabled
     }
 });
+
+// ==============================
+// Box Breathing Toggle
+// Part of: Meditation mode, Overlay
+// ==============================
+// Switches the breathing overlay between relaxed 4-6 and box 4-4-4-4
+// Resets the cycle so it starts on a fresh inhale
+const boxBreathingToggle = document.getElementById('boxBreathingToggle');
+if (boxBreathingToggle) {
+    boxBreathingToggle.addEventListener('change', e => {
+        breathPatternName = e.target.checked ? 'box' : 'relaxed';
+        breathPhaseIndex = 0;
+        breathTimer = 0;
+    });
+}
     
 // ==============================
 // Level Display UI
@@ -1333,24 +1380,24 @@ function toggleMeditationMode() {
     if (!isMeditationMode && isABCMode) { toggleABCMode(); }
 
     // Reset breathing overlay state when toggling meditation mode
-    breathPhase = 'inhale';
+    breathPhaseIndex = 0;
     breathTimer = 0;
     const btn = $('meditationToggle');
     isMeditationMode = !isMeditationMode;
 
-    // Show/hide advanced level rows for meditation mode
+    // Show/hide advanced level rows for meditation mode (bounce only -> level 4, idx 3)
     const allLevelRows = document.querySelectorAll('.level-speed-row');
     allLevelRows.forEach((row, idx) => {
-      // Only show rows for levels 1, 4 in meditation mode
       if (isMeditationMode) {
-        if ([0, 3].includes(idx)) {
-          row.style.display = '';
-        } else {
-          row.style.display = 'none';
-        }
+        row.style.display = (idx === 3) ? '' : 'none';
       } else {
         row.style.display = '';
       }
+    });
+
+    // Hide Previous/Next level buttons in meditation mode (single fixed level)
+    document.querySelectorAll('.level-change-group .level-btn').forEach(b => {
+        b.style.display = isMeditationMode ? 'none' : '';
     });
 
     // Scale meditation speeds for current screen type
@@ -1380,9 +1427,33 @@ function toggleMeditationMode() {
         savedAutoSwitch = $('autoNextToggle').checked;
         savedSizePercent = parseFloat($('sizeInput').value);
         savedRoundDuration = parseFloat($('roundDuration').value);
+        savedFlashDisabled = $('disableFlashToggle').checked;
+
+        // Save Reading UI / 3D / stripe overlay state, then force them off for the session
+        // Toggles stay clickable so they can be re enabled mid session if wanted
+        // Track flags directly (not just checkboxes) so exit restores cleanly
+        savedReadingUIEnabled = readingUIEnabled;
+        saved3DEnabled = is3DMode;
+        savedOverlays = {
+            hashtag: hashtagOverlay,
+            vertical: verticalStripesOverlay,
+            horizontal: horizontalStripesOverlay,
+            solid: solidStripes
+        };
+        readingUIEnabled = false;
+        readingUICode = null;
+        $('readingUIToggle').checked = false;
+        is3DMode = false;
+        depthScale = 1; // snap drawn size back to true size
+        $('depth3DToggle').checked = false;
+        hashtagOverlay = verticalStripesOverlay = horizontalStripesOverlay = solidStripes = false;
+        $('hashtagToggle').checked = false;
+        $('verticalStripesToggle').checked = false;
+        $('horizontalStripesToggle').checked = false;
+        $('solidStripesToggle').checked = false;
 
         // Apply meditation specific settings:
-        // fixed speeds & colors, fixed size and duration
+        // fixed speeds & colors, fixed size, 5 min round (editable), flash cue on
         levelSpeeds = [...meditationSpeedsScaled];
         speedInputs.forEach((input, i) => {
             input.value = meditationSpeedsScaled[i];
@@ -1395,7 +1466,9 @@ function toggleMeditationMode() {
         $('flashColor').value = '#aa7839';
         $('autoNextToggle').checked = true;
         $('sizeInput').value = 100;
-        $('roundDuration').value = 60;
+        $('roundDuration').value = 300; // 5 min default, user can rewrite
+        // Turn the flash cue ON so the round end is noticeable (toggle is "disable", so uncheck :)))
+        $('disableFlashToggle').checked = false;
 
         // Update internal state variables to match meditation settings
         ballColor = $('ballColor').value;
@@ -1405,7 +1478,10 @@ function toggleMeditationMode() {
         document.body.style.backgroundColor = backgroundColor;
         sizePercent = 100;
         ballRadius = baseBallRadius * (sizePercent / 100);
-        roundDuration = 60;
+        roundDuration = 300;
+
+        // Refresh the menu preview so it shows the meditation target (gold, size 100)
+        if (typeof drawPreview === 'function') drawPreview();
         
         // Check current level if its valid for meditation mode
         if (!meditationLevels.includes(level)) {
@@ -1417,7 +1493,7 @@ function toggleMeditationMode() {
         // Starts meditation round
         resetLevel(); // sets timer, speed, etc.
     } else {
-        // Exiting -> un-highlight button and restore label
+        // Exiting -> unhighlight button and restore label
         btn.classList.remove('active');
         btn.textContent = "Enter Meditation Mode";
 
@@ -1435,6 +1511,26 @@ function toggleMeditationMode() {
         $('autoNextToggle').checked = savedAutoSwitch;
         $('sizeInput').value = savedSizePercent;
         $('roundDuration').value = savedRoundDuration;
+        $('disableFlashToggle').checked = savedFlashDisabled;
+
+        // Restore Reading UI / 3D / stripe overlays to the pre meditation state
+        readingUIEnabled = savedReadingUIEnabled;
+        $('readingUIToggle').checked = savedReadingUIEnabled;
+        if (savedReadingUIEnabled) {
+            readingUICode = null;
+            rollReadingUICode();
+        }
+        is3DMode = saved3DEnabled;
+        $('depth3DToggle').checked = saved3DEnabled;
+        if (!saved3DEnabled) depthScale = 1;
+        hashtagOverlay = !!savedOverlays.hashtag;
+        verticalStripesOverlay = !!savedOverlays.vertical;
+        horizontalStripesOverlay = !!savedOverlays.horizontal;
+        solidStripes = !!savedOverlays.solid;
+        $('hashtagToggle').checked = hashtagOverlay;
+        $('verticalStripesToggle').checked = verticalStripesOverlay;
+        $('horizontalStripesToggle').checked = horizontalStripesOverlay;
+        $('solidStripesToggle').checked = solidStripes;
 
         // Update internal state variables to match restored settings
         ballColor = $('ballColor').value;
@@ -1445,6 +1541,9 @@ function toggleMeditationMode() {
         sizePercent = savedSizePercent;
         ballRadius = baseBallRadius * (sizePercent / 100);
         roundDuration = savedRoundDuration;
+
+        // Refresh the menu preview so it shows the restored target
+        if (typeof drawPreview === 'function') drawPreview();
 
         // Start normal round with restored settings
         resetLevel();
