@@ -20,7 +20,7 @@ Tracking moving targets with your eyes activates visual motor pathways, improves
 
 **Breathing & slow visuals = chill**
 
-Meditation mode slows it all down - pastel colors, 4 second inhale / 6 second exhale rhythm, and a pulsing circle. Controlled breathing should activate your parasympathetic nervous system, reducing heart rate, cortisol, and improving focus and emotional regulation. Watching slow, predictable visuals should also reduce anxiety and improve sustained attention.
+Meditation mode slows it all down - pastel colors, a pulsing circle, and your choice of breathing rhythm: the default 4 second inhale / 6 second exhale, or box breathing (4-4-4-4) with holds. Controlled breathing should activate your parasympathetic nervous system, reducing heart rate, cortisol, and improving focus and emotional regulation. Watching slow, predictable visuals should also reduce anxiety and improve sustained attention.
 
 **Stripes**
 
@@ -37,9 +37,10 @@ Press **←** or **→** arrow keys to navigate through levels.
 - **Resolution picker:** FHD / QHD / 4K (higher resolution = faster target movement because, y'know, pixels/sec).
 - **Color customization:** Target, dot, background, flash color.
 - **Live preview:** A little dummy target showing your current size + colors, so you don't commit to neon green blindly.
-- **Toggles:** Flash cue on level change, level auto-switching, hashtag overlay, vertical/horizontal stripes (solid or transparent). Yes, this is real.
+- **Toggles:** Flash cue on level change, level auto switching, hashtag overlay, vertical/horizontal stripes (solid or transparent). Yes, this is real.
 - **3D Depth Simulation:** Fakes a z-axis by breathing the target toward and away from you. Pure illusion.
 - **Reading UI Codes:** Drops a random 4 character code in a corner that hops around every few seconds. For when you want to practice reading the scoreboard or something mid fight without dying.
+- **Meditation Box Breathing:** Switches the meditation breathing guide from the default 4-6 rhythm to a 4-4-4-4 box pattern with holds.
 
 ### Column 2 - Difficulty Master
 
@@ -81,22 +82,24 @@ All with a touch of randomness.
 
 Activate Meditation Mode via the menu. Here's what changes:
 
-- Only **Levels 1 and 4** are used (aka the chill ones - gentle axis glide and effortless bounce)
+- Only the Bounce level is used (chill edge bouncing, easy flow, positivity, some other words, nice)
 - All movement is slowed way down
-- 60 second rounds with auto switching
+- 5 minute rounds (editable) with a flash cue marking each interval
+- Previous/Next buttons hidden since it's a single fixed level
+- Reading UI Codes, 3D Depth, and stripe overlays are turned off on entry (and restored when you leave). U entered a chill zone, that's why.
 - Pastel-night calming color theme
-- Inhale/exhale visual guide (4s in / 6s out)
+- Breathing visual guide - 4s in / 6s out by default, or 4-4-4-4 box breathing
 
-**Why?** Controlled breathing:
+**Why?** Controlled breathing **should**:
 
-- Lowers cortisol
-- Activates parasympathetic response
-- Sharpens attention
-- Reduces anxiety
+- Lower cortisol
+- Activate parasympathetic response
+- Sharpen attention
+- Reduce anxiety
 
 ## ABC Mode
 
-A separate toggle that ditches levels entirely and has the target *trace letters and shapes* - the full alphabet plus a couple of warm up shapes. It draws each stroke forward, reverses back over it, then mirrors the whole glyph before advancing. Continuous, no round timer, just vibes. +,x,A-Z without X because that is already after plus. So why keep x shape and not letter X? Shut up.
+A separate toggle that ditches levels entirely and has the target *trace letters and shapes* - the full alphabet plus a couple of warm up shapes. It draws each stroke forward, reverses back over it, then mirrors the whole glyph before advancing. Continuous, no round timer, +,x,A-Z shapes. Are you not entertained? Shut up.
 
 Fair warning: the letters are a little scuffed. They're legibleishhh. It's staying anyway.
 
