@@ -1495,7 +1495,7 @@ function toggleMeditationMode() {
     } else {
         // Exiting -> unhighlight button and restore label
         btn.classList.remove('active');
-        btn.textContent = "Enter Meditation Mode";
+        btn.textContent = "Meditation Mode";
 
         // Restore all previously saved user settings
         levelSpeeds = [...savedSpeeds];
