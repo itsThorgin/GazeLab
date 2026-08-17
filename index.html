@@ -23,12 +23,9 @@
       <div class="controls-columns">
         <!-- COLUMN 1: Display & Visuals -->
         <div class="controls-col controls-col-visuals">
-          <label class="right-align">Screen Type:
-            <select id="screenTypeSelect" onchange="updateScreenScaling()">
-              <option value="1" selected>1080p (Full HD)</option>
-              <option value="1.33">1440p (QHD)</option>
-              <option value="2">2160p (4K)</option>
-            </select>
+          <h2 class="column-title">Display & Effects</h2>
+          <label class="right-align">Display Scaling:
+            <output id="screenScaleDisplay" class="auto-scale-value" aria-live="polite">Detecting...</output>
           </label>
           <div class="color-row right-align">
             <span>Ball Color</span><input id="ballColor" type="color" value="#ff0000"/>
@@ -43,7 +40,12 @@
             <span>Flash Color</span><input id="flashColor" type="color" value="#aa7839"/>
           </div>
           <div class="preview-row">
-            <span>Preview</span>
+            <div class="preview-label-group">
+              <span>Preview</span>
+              <label class="preview-cycle-toggle" title="Switches between contrast safe background, target and center dot colors every 3 to 10 seconds">
+                <span>Cycle colors</span><input id="colorCycleToggle" type="checkbox"/>
+              </label>
+            </div>
             <canvas id="previewCanvas" width="140" height="140"></canvas>
           </div>
           <div class="checkbox-row">
@@ -76,10 +78,11 @@
         </div>
         <!-- COLUMN 2: Level Speeds -->
         <div class="controls-col controls-col-levelspeeds">
+          <h2 class="column-title">Training Speeds</h2>
           <div class="section-label">Select difficulty</div>
           <div class="inline-group">
             <label>Tier:
-              <select id="tierSelect" onchange="updateLevelFromTier()">
+              <select id="tierSelect">
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="3">3</option>
@@ -99,7 +102,7 @@
               </select>
             </label>
             <label>Sublevel:
-              <select id="subLevelInput" onchange="updateLevelFromTier()">
+              <select id="subLevelInput">
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="3">3</option>
@@ -189,9 +192,33 @@
               </button>
             </div>
           </fieldset>
+          <fieldset id="profileManager" class="profile-manager is-collapsed" aria-labelledby="profileCollapseButton">
+            <button id="profileCollapseButton" type="button" aria-expanded="false" aria-controls="profileManagerContent">
+              <span>Profiles</span>
+              <span class="profile-collapse-icon" aria-hidden="true"></span>
+            </button>
+            <div id="profileManagerContent" class="profile-manager-content" hidden>
+              <label for="profileName">Profile name:</label>
+              <input id="profileName" type="text" maxlength="40" autocomplete="off" placeholder="My training setup"/>
+
+              <label for="profileSelect">Saved profiles:</label>
+              <select id="profileSelect">
+                <option value="">Select a profile...</option>
+              </select>
+
+              <div class="profile-actions">
+                <button id="profileSaveButton" type="button">Save</button>
+                <button id="profileLoadButton" type="button" disabled>Load</button>
+                <button id="profileDeleteButton" type="button" disabled>Delete</button>
+              </div>
+              <button id="profileClearButton" class="profile-clear-button" type="button">Clear All Local Data</button>
+              <div id="profileStatus" class="profile-status" role="status" aria-live="polite"></div>
+            </div>
+          </fieldset>
         </div>
         <!-- COLUMN 3: Gameplay & Status -->
         <div class="controls-col controls-col-gameplay">
+          <h2 class="column-title">Session & Level</h2>
           <label>Speed Adjustment Increment (%):
             <select id="speedIncrement">
               <option value="0.5">0.5%</option>
@@ -204,7 +231,7 @@
             <label>Current Level Speed (px/s):
               <div class="speed-controls">
                 <input id="speedInput" step="0.1" type="number" value="1000"/>
-                <button onclick="changeSpeed(-1)">–</button>
+                <button onclick="changeSpeed(-1)">-</button>
                 <button onclick="changeSpeed(1)">+</button>
               </div>
             </label>
@@ -213,7 +240,7 @@
             <label>Size (15-200%):
               <div class="size-controls">
                 <input id="sizeInput" step="2.5" type="number" value="50" min="15" max="200"/>
-                <button onclick="changeSize(-2.5)">–</button>
+                <button onclick="changeSize(-2.5)">-</button>
                 <button onclick="changeSize(2.5)">+</button>
               </div>
             </label>
@@ -229,18 +256,45 @@
           <div class="timers-group">
             <div class="timer-row">Elapsed Time: <span id="elapsedTimeDisplay">00:00:00</span></div>
             <div class="timer-row">Round Time: <span id="roundTimeDisplay">00:30</span></div>
+            <div class="timer-row">FPS: <span id="fpsDisplay">--</span></div>
           </div>
         </div>
       </div>
       <footer id="menuFooter">Made with not so much ❤️ by Thorgin &copy; 2025</footer>
-      </div>
     </div>
 
-    <!-- Menu btn toggle -->
-    <button id="menuButton" onclick="toggleMenu()" style="position: absolute; top: 10px; right: 10px; z-index: 11;">'M'enu</button>
+    <!-- Corner level feedback and menu toggle -->
+    <div id="menuCornerHud">
+      <output id="levelToast" class="level-toast" aria-live="polite" aria-atomic="true"></output>
+      <button id="menuButton" type="button" aria-controls="controls" aria-expanded="true" onclick="toggleMenu()">'M'enu</button>
+    </div>
 
     <!-- Canvas -->
     <canvas id="gameCanvas"></canvas>
+
+    <!-- Meditation completion controls -->
+    <section id="meditationCompletion" aria-labelledby="meditationCompletionTitle" aria-hidden="true" hidden>
+      <div class="meditation-completion-card">
+        <h2 id="meditationCompletionTitle">Meditation Complete</h2>
+        <div class="meditation-completion-actions">
+          <button id="meditationRestart" type="button" onclick="restartMeditationSession()">Restart</button>
+          <button id="meditationExit" type="button" onclick="toggleMeditationMode()">Exit</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Confirmation dialog for destructive local actions -->
+    <section id="appConfirmOverlay" class="app-confirm-overlay" aria-hidden="true" hidden>
+      <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="appConfirmTitle" aria-describedby="appConfirmMessage">
+        <div class="app-confirm-mark" aria-hidden="true">!</div>
+        <h2 id="appConfirmTitle">Confirm action</h2>
+        <p id="appConfirmMessage"></p>
+        <div class="app-confirm-actions">
+          <button id="appConfirmCancel" type="button">Cancel</button>
+          <button id="appConfirmAccept" type="button">Confirm</button>
+        </div>
+      </div>
+    </section>
 
     <!-- JS -->
     <script src="main.js"></script>
