@@ -12,8 +12,55 @@
 // Tiers for user progression
 const tiers = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"];
 const levelsPerTier = 10;
-// Total number of levels
-const totalLevels = tiers.length * levelsPerTier;
+const FHD_REFERENCE_SHORT_SIDE = 1080;
+const CURVE_ARC_SAMPLES = 512;
+const DOOR_ARC_SAMPLES = 96;
+
+// Table for a parameterized 2D curve
+// Converting between curve parameter and travelled distance lets curved paths honor px/s
+// instead of speeding up or slowing down as their geometry changes
+function buildArcLengthLookup(pointAt, maxParameter = 1, samples = CURVE_ARC_SAMPLES) {
+    const cumulative = new Float64Array(samples + 1);
+    let previous = pointAt(0);
+
+    for (let i = 1; i <= samples; i++) {
+        const parameter = (i / samples) * maxParameter;
+        const point = pointAt(parameter);
+        cumulative[i] = cumulative[i - 1] + Math.hypot(point.x - previous.x, point.y - previous.y);
+        previous = point;
+    }
+
+    return { cumulative, maxParameter, samples, totalLength: cumulative[samples] };
+}
+
+function parameterAtArcDistance(lookup, distance) {
+    const target = Math.max(0, Math.min(lookup.totalLength, distance));
+    let low = 0;
+    let high = lookup.samples;
+
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if (lookup.cumulative[middle] < target) low = middle + 1;
+        else high = middle;
+    }
+
+    const upper = Math.max(1, low);
+    const lower = upper - 1;
+    const segmentStart = lookup.cumulative[lower];
+    const segmentLength = lookup.cumulative[upper] - segmentStart;
+    const fraction = segmentLength > 0 ? (target - segmentStart) / segmentLength : 0;
+    return ((lower + fraction) / lookup.samples) * lookup.maxParameter;
+}
+
+function arcDistanceAtParameter(lookup, parameter) {
+    const normalized = Math.max(0, Math.min(1, parameter / lookup.maxParameter));
+    const samplePosition = normalized * lookup.samples;
+    const lower = Math.min(lookup.samples - 1, Math.floor(samplePosition));
+    const upper = lower + 1;
+    const fraction = samplePosition - lower;
+    return lookup.cumulative[lower] +
+        (lookup.cumulative[upper] - lookup.cumulative[lower]) * fraction;
+}
 
 // Base speeds for each level (unscaled, for full HD)
 let baseSpeeds = [1000, 350, 600, 1200, 400, 200, 500, 700, 550];
@@ -25,19 +72,15 @@ let selectedSublevel = 1;
 // Stores all calculated speeds for all levels/tiers
 let allLevelSpeeds = [];
 
-// Level 6 direction change
+// Level 4 direction change
 let lastDirectionChangeTime = 0;
 const directionChangeCooldown = 3000; // 3 sec
 const directionChangeChance = 0.33; // % chance
-// Minimum distance (as fraction of smaller screen dimension)
+// Minimum distance (fraction of smaller screen dimension)
 // the target must travel since the last reversal before another reversal can be considered
 // This keeps the behavior speed independent: at low speeds the target won't flip after only a tiny move
 const directionChangeMinDistFraction = 0.25; // 25% of min(width, height)
 let distanceSinceDirectionChange = 0; // Accumulated travel since last reversal
-
-// Listen for screen type changes to update scaling
-// Part of: Screen scaling - updateScreenScaling function
-document.getElementById('screenTypeSelect').addEventListener('change', updateScreenScaling);
 
 // ----------------------------------
 // Generates speed values for all levels/tiers
@@ -75,17 +118,6 @@ function generateAllSpeeds(baseSpeeds, tiers, levelsPerTier) {
 }
 
 // ----------------------------------
-// Returns the current level index based on user selection
-// Part of: Level system
-// ----------------------------------
-function getCurrentLevelIndex() {
-    const tier = document.getElementById('tierSelect').value;
-    const subLevel = parseInt(document.getElementById('subLevelInput').value);
-    const tierIndex = tiers.indexOf(tier);
-    return (tierIndex * levelsPerTier) + (subLevel - 1);
-}
-
-// ----------------------------------
 // Updates the current level and speed based on tier/sublevel selection
 // Part of: Level system, UI interaction
 // ----------------------------------
@@ -97,7 +129,8 @@ function updateLevelFromTier() {
     // Get the correct speeds for the selected tier/sublevel
     const tierIndex = tiers.indexOf(selectedTier);
     const levelIndex = (tierIndex * levelsPerTier) + (selectedSublevel - 1);
-    const speeds = allLevelSpeeds[levelIndex].map(s => parseFloat((s * resolutionScale).toFixed(2)));
+    referenceLevelSpeeds = [...allLevelSpeeds[levelIndex]];
+    const speeds = scaleReferenceSpeeds(referenceLevelSpeeds);
     levelSpeeds = [...speeds];
     speedInputs.forEach((input, i) => input.value = speeds[i]);
 
@@ -130,9 +163,35 @@ function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 }
-// Resize canvas whenever window size changes
-window.addEventListener('resize', resizeCanvas);
+
+let screenScaleResizeTimer = null;
+function handleViewportResize() {
+    resizeCanvas();
+    clearTimeout(screenScaleResizeTimer);
+    screenScaleResizeTimer = setTimeout(updateScreenScaling, 120);
+}
+
+// A monitor move can change devicePixelRatio without otherwise changing the viewport
+// Rearm the media query after every change because its value is fixed when created
+let removePixelRatioListener = null;
+function watchPixelRatioChanges() {
+    if (removePixelRatioListener) removePixelRatioListener();
+    if (typeof window.matchMedia !== 'function') return;
+
+    const query = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    const handleChange = () => {
+        watchPixelRatioChanges();
+        handleViewportResize();
+    };
+    query.addEventListener('change', handleChange, { once: true });
+    removePixelRatioListener = () => query.removeEventListener('change', handleChange);
+}
+
+// Resize immediately, then debounce the more expensive level rescaling/reset
+window.addEventListener('resize', handleViewportResize);
+document.addEventListener('fullscreenchange', handleViewportResize);
 resizeCanvas();
+watchPixelRatioChanges();
 
 // ==============================
 // Level and Meditation Initialization
@@ -150,7 +209,15 @@ $('levelDisplay').innerText = "Level " + level;
 const meditationSpeeds = [75, 0, 0, 75, 0, 0, 0, 0, 0];
 let meditationSpeedsScaled = [...meditationSpeeds]; // Holds scaled values for current resolution
 let isMeditationMode = false;
-let savedSpeeds = [];
+const MEDITATION_END_DURATION = 4;
+const MEDITATION_START_DURATION = 1.5;
+const MEDITATION_NORMAL_TURN_RATE = 0.22;
+const MEDITATION_BOUNDARY_TURN_RATE = 0.75;
+let meditationSessionState = 'idle'; // idle, running, ending, complete
+let meditationEndingElapsed = 0;
+let meditationStartingElapsed = MEDITATION_START_DURATION;
+let meditationMotionState = null;
+let savedReferenceSpeeds = [];
 let savedColors = {};
 let savedAutoSwitch = false;
 let savedSizePercent = 50;
@@ -168,8 +235,23 @@ let savedFlashDisabled = false; // disableFlashToggle state, restored on exit
 // ----------------------------------
 function toggleMenu() {
     const controls = $('controls');
-    controls.style.display = (controls.style.display === 'none') ? 'block' : 'none';
+    const willOpen = controls.style.display === 'none';
+    controls.style.display = willOpen ? 'block' : 'none';
+    $('menuButton').setAttribute('aria-expanded', String(willOpen));
 }
+
+function showKeyboardLevelToast() {
+    const toast = $('levelToast');
+    toast.textContent = `Level ${level}`;
+    toast.classList.remove('is-visible');
+    // Restart the short animation so rapid arrow presses show the latest value
+    void toast.offsetWidth;
+    toast.classList.add('is-visible');
+}
+
+$('levelToast').addEventListener('animationend', () => {
+    $('levelToast').classList.remove('is-visible');
+});
 
 // ----------------------------------
 // Keyboard shortcut for toggling menu
@@ -209,6 +291,7 @@ document.addEventListener('keydown', function(e) {
         } else {
             nextLevel();
         }
+        showKeyboardLevelToast();
     }
 });
 
@@ -222,59 +305,121 @@ let ballColor = $('ballColor').value;
 let dotColor = $('dotColor').value;
 let backgroundColor = $('bgColor').value;
 let flashColor = $('flashColor').value;
-let clockState = null; // Used for clock level 7
-let resolutionScale = 1; // Used for scaling speeds
-let peekState = null; // Used for peek level 8
-// Level 8 pillar wander: the pillar (and the target's peek) drift slowly around screen center
+
+// Curated target / center-dot pairs
+// Selection is filtered against each chosen background at runtime
+const TARGET_COLOR_PAIRS = [
+    { target: '#ff6b6b', dot: '#1a0b0b' }, // coral / deep brown
+    { target: '#f59e0b', dot: '#1a1203' }, // amber / espresso
+    { target: '#facc15', dot: '#171204' }, // gold / near black
+    { target: '#a3e635', dot: '#152006' }, // lime / forest black
+    { target: '#2dd4bf', dot: '#06211e' }, // mint / dark teal
+    { target: '#22d3ee', dot: '#062027' }, // cyan / deep blue
+    { target: '#e9c46a', dot: '#1b170b' }, // sand / umber
+    { target: '#bae6fd', dot: '#102131' }, // ice / navy
+    { target: '#7f1d1d', dot: '#ffffff' }, // deep red / white
+    { target: '#14532d', dot: '#ffffff' }, // forest / white
+    { target: '#115e59', dot: '#ffffff' }, // deep teal / white
+    { target: '#0c4a6e', dot: '#ffffff' }, // navy / white
+    { target: '#1e3a8a', dot: '#ffffff' }, // deep blue / white
+    { target: '#3730a3', dot: '#ffffff' }, // indigo / white
+    { target: '#581c87', dot: '#ffffff' }, // plum / white
+    { target: '#111827', dot: '#ffffff' }, // charcoal / white
+    { target: '#ef4444', dot: '#ffffff' }, // red / white
+    { target: '#3b82f6', dot: '#ffffff' }, // blue / white
+    { target: '#8b5cf6', dot: '#ffffff' }, // violet / white
+    { target: '#ec4899', dot: '#1d0b16' }, // pink / near black
+];
+
+// Muted dark backgrounds
+const COLOR_CYCLE_BACKGROUNDS = [
+    '#30343b', // graphite
+    '#293241', // slate blue
+    '#273043', // dusk blue
+    '#2d2a40', // muted indigo
+    '#33283c', // muted plum
+    '#3a2b35', // muted berry
+    '#352f2a', // soft umber
+    '#30352c', // olive charcoal
+    '#25372f', // forest charcoal
+    '#233838', // deep muted teal
+    '#24363d', // blue charcoal
+    '#263447', // storm blue
+    '#2e3440', // cool graphite
+    '#34323d', // smoky violet
+    '#3b3330', // warm charcoal
+    '#31383a', // steel charcoal
+    '#3a3036', // smoky rose
+    '#28353a', // deep blue-grey
+    '#303047', // twilight indigo
+    '#2f3a32', // muted pine
+];
+const COLOR_CYCLE_MIN_SECONDS = 3;
+const COLOR_CYCLE_MAX_SECONDS = 10;
+const MIN_TARGET_BACKGROUND_CONTRAST = 2.4;
+const MIN_DOT_TARGET_CONTRAST = 3.5;
+let colorCycleTimeRemaining = 0;
+let lastColorPairIndex = -1;
+let lastColorBackgroundIndex = -1;
+let colorCycleBaseColors = null;
+let clockState = null; // Used for clock level 5
+let resolutionScale = 1; // Native monitor resolution relative to Full HD
+let displayPixelRatio = 1; // Native display pixels represented by one canvas/CSS pixel
+let detectedDisplayWidth = 1920;
+let detectedDisplayHeight = 1080;
+let lastDisplaySignature = '';
+let peekState = null; // Used for peek level 6
+// Level 6 pillar wander: the pillar (and the target's peek) drift slowly around screen center
 // Persistent across peeks so the motion is continuous
 // Uses two slow sine waves of different frequencies for the wander
 let peekWanderT = 0;                 // time accumulator for the wander
 const PEEK_WANDER_SPEED = 0.5;       // base radians/sec of the drift
 const PEEK_WANDER_AMP_X = 0.10;      // x amplitude as fraction of screen width
 const PEEK_WANDER_AMP_Y = 0.10;      // y amplitude as fraction of screen height
-// Current wandering pillar center (updated each frame in level 8)
+// Current wandering pillar center (updated each frame in level 6)
 function peekAnchor() {
     const cx = canvas.width / 2 + Math.sin(peekWanderT) * canvas.width * PEEK_WANDER_AMP_X;
     const cy = canvas.height / 2 + Math.sin(peekWanderT * 1.3 + 0.7) * canvas.height * PEEK_WANDER_AMP_Y;
     return { x: cx, y: cy };
 }
-let doorsState = null; // Used for door peek level 10
+let doorsState = null; // Used for door peek level 8
 
 // ==============================
-// Level 11: Recursive Star (nested 12 spoke clock stars)
+// Level 9: Recursive Star (nested 12 arm stars)
 // ==============================
-// A 12 spoke hub at a drifting center
-// The target goes center -> tip of a random spoke -> tip of a random spoke on a smaller star there -> tip of a random spoke
+// A 12 arm hub at a drifting center
+// The target goes center -> tip of a random arm -> tip of a random arm on a smaller star there -> tip of a random arm
 // on an even smaller star -> then reverses the whole path back to center and starts a new random journey
 // The whole structure drifts a bit around center
 const STAR_ARMS = 12;                 // spokes per star (clock positions)
 const STAR_R1_FRAC = 0.20;            // first arm length, fraction of min screen dim
 const STAR_R2_FRAC = 0.11;            // second (smaller) star arm length
 const STAR_R3_FRAC = 0.06;            // third (smallest) star arm length
+const STAR_LEG_SPEED_MULTIPLIERS = [1, 0.75, 0.55]; // slow shorter inner legs for readability
+const STAR_INTER_LEG_PAUSE_RATIO = 0.18; // pause relative to first-leg travel time
+const STAR_TURN_PAUSE_RATIO = 0.30;      // longer pause before reversing / starting over
 const STAR_DRIFT_SPEED = 0.4;         // radians/sec of center drift
-const STAR_MIN_LEG_TIME = 0.5;        // min seconds per leg (keeps inner legs readable)
 const STAR_DRIFT_AMP_X = 0.05;        // drift amplitude, fraction of width
 const STAR_DRIFT_AMP_Y = 0.05;        // drift amplitude, fraction of height
 let starDriftT = 0;                   // persistent drift accumulator
-let starState = null;                 // tracer state for level 11
+let starState = null;                 // tracer state for level 9
 
-// Current drifting center of the whole star structure.
+// Current drifting center of the whole star structure
 function starCenter() {
     return {
         x: canvas.width / 2 + Math.sin(starDriftT) * canvas.width * STAR_DRIFT_AMP_X,
         y: canvas.height / 2 + Math.sin(starDriftT * 1.3 + 0.5) * canvas.height * STAR_DRIFT_AMP_Y,
     };
 }
-let circleState = null; // Used for circular orbit level 9
+let circleState = null; // Used for circular orbit level 7
 
 // ==============================
-// ABC Mode (letter/shape tracing) a separate mode, not a level
+// ABC Mode (letter/shape tracing)
 // ==============================
-// A toggleable mode (like meditation) where the target traces letters and shapes
 // Each glyph is a list of STROKES; each stroke a polyline in a 0..1 box (y down)
 // The target traces a stroke forward, reverses back to its start, then moves to the next stroke
 // after all strokes, the MIRRORED glyph does the same, then the next glyph in the sequence
-// Multi-stroke means every segment is covered exactly twice (once each direction) even coverage
+// Multi stroke means every segment is covered exactly twice (once each direction)
 // Runs continuously with no round timer
 // Mirror = x -> 1-x
 function abcArc(cx,cy,r,a0,a1,steps){const p=[];for(let i=0;i<=steps;i++){const a=a0+(a1-a0)*i/steps;p.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}return p;}
@@ -307,19 +452,22 @@ const ABC_GLYPHS = {
     Y: [ [[0.1,0.0],[0.5,0.5],[0.9,0.0]], [[0.5,0.5],[0.5,1.0]] ],
     Z: [ [[0.1,0.0],[0.9,0.0],[0.1,1.0],[0.9,1.0]] ],
 };
-// Sequence order: shapes first, then the alphabet
-const ABC_SEQUENCE = ['PLUS','X',...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+// Sequence order: shape first, then the alphabet
+const ABC_SEQUENCE = ['PLUS', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
 const ABC_SPEED = 450; // on screen tracing speed (px/sec, scaled by resolution)
 let isABCMode = false;  // whether ABC mode is active
 let abcState = null;    // tracer state for ABC mode
 
 // Level speed input fields and their values
 const speedInputs = [];
+let referenceLevelSpeeds = [];
 let levelSpeeds = [];
 for (let i = 1; i <= maxLevel; i++) {
     const input = $(`speedLevel${i}`);
+    const initialSpeed = parseFloat(input.value);
     speedInputs.push(input);
-    levelSpeeds.push(parseFloat(input.value));
+    referenceLevelSpeeds.push(initialSpeed);
+    levelSpeeds.push(initialSpeed);
 }
 
 // Listening for changes to speed input fields
@@ -367,9 +515,9 @@ document.addEventListener('click', function (e) {
   // Always restore allLevelSpeeds
   allLevelSpeeds = generateAllSpeeds(baseSpeeds, tiers, levelsPerTier);
   if (!allLevelSpeeds || !allLevelSpeeds[levelIndex]) return;
-  let correctSpeed = allLevelSpeeds[levelIndex][levelIdx];
-  // Apply resolution scaling for current screen type
-  correctSpeed = parseFloat((correctSpeed * resolutionScale).toFixed(2));
+  const correctReferenceSpeed = allLevelSpeeds[levelIndex][levelIdx];
+  const correctSpeed = scaleReferenceSpeed(correctReferenceSpeed);
+  referenceLevelSpeeds[levelIdx] = correctReferenceSpeed;
   speedInputs[levelIdx].value = correctSpeed;
   levelSpeeds[levelIdx] = correctSpeed;
   if (level - 1 === levelIdx) {
@@ -384,6 +532,9 @@ speedInputs.forEach((input, index) => {
         const newSpeed = parseFloat(e.target.value);
         if (!isNaN(newSpeed)) {
             levelSpeeds[index] = newSpeed;
+            if (!isMeditationMode) {
+                referenceLevelSpeeds[index] = unscaleEffectiveSpeed(newSpeed);
+            }
 
             // If current level speed edited, apply and reset the level
             if (level - 1 === index) {
@@ -433,6 +584,7 @@ function currentBreathPhase() {
 // Part of: Meditation mode, Overlay
 // ----------------------------------
 function updateBreathTimer(deltaTime) {
+    if (!isMeditationMode || meditationSessionState === 'complete') return;
     breathTimer += deltaTime;
     const phase = currentBreathPhase();
     if (breathTimer >= phase.duration) {
@@ -444,79 +596,291 @@ function updateBreathTimer(deltaTime) {
 }
 
 // ----------------------------------
-// Draws the breathing overlay animation and text
+// Builds the responsive, eased visual state shared by the halo and its label
 // Part of: Meditation mode, Overlay
 // ----------------------------------
-function drawBreathingOverlay() {
-    if (!isMeditationMode) return;
+function smoothstep01(value) {
+    const clamped = Math.max(0, Math.min(1, value));
+    return clamped * clamped * (3 - 2 * clamped);
+}
 
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
+function breathingVisualState() {
+    if (!isMeditationMode || meditationSessionState === 'complete') return null;
     const phase = currentBreathPhase();
     const progress = Math.min(1, breathTimer / phase.duration); // 0..1 within the phase
+    const easedProgress = 0.5 - 0.5 * Math.cos(progress * Math.PI);
 
-    // fullness maps the phase to circle size: 0 = smallest (empty), 1 = largest (full)
+    // Fullness maps the phase to halo size: 0 = empty, 1 = full
+    // Cosine easing
     // holds pin to their endpoint so the circle visibly pauses during box breathing
-    const RADIUS_MIN = 200, RADIUS_MAX = 425;
     let fullness;
     switch (phase.kind) {
-        case 'inhale':     fullness = progress;     break; // grow
-        case 'exhale':     fullness = 1 - progress; break; // shrink
-        case 'hold-full':  fullness = 1;            break; // stay big
-        case 'hold-empty': fullness = 0;            break; // stay small
-        default:           fullness = progress;     break;
-    }
-    const radius = RADIUS_MIN + (RADIUS_MAX - RADIUS_MIN) * fullness;
-
-    // Opacity + color per phase, inhale/hold full use the warm tone, exhale/hold empty the dark one
-    // holds at a steady opacity so they read as a pause
-    let opacity, color;
-    if (phase.kind === 'exhale') {
-        // Exhale: lightens in the last 25%
-        opacity = (progress < 0.75) ? 0.3 : 0.3 - 0.175 * ((progress - 0.75) / 0.25);
-        color = '#552f00';
-    } else if (phase.kind === 'inhale') {
-        // Inhale: lightens in the last 25%
-        opacity = (progress > 0.75) ? 0.2 + 0.15 * ((progress - 0.75) / 0.25) : 0.2;
-        color = '#ffd9aa';
-    } else if (phase.kind === 'hold-full') {
-        opacity = 0.32;
-        color = '#ffd9aa';
-    } else { // hold-empty
-        opacity = 0.22;
-        color = '#552f00';
+        case 'inhale':     fullness = easedProgress;     break;
+        case 'exhale':     fullness = 1 - easedProgress; break;
+        case 'hold-full':  fullness = 1;                  break;
+        case 'hold-empty': fullness = 0;                  break;
+        default:           fullness = easedProgress;     break;
     }
 
-    ctx.save();
-    ctx.globalAlpha = opacity;
+    const minDimension = Math.min(canvas.width, canvas.height);
+    const minRadius = Math.max(70, minDimension * 0.14);
+    const maxRadius = Math.max(minRadius + 40, minDimension * 0.37);
+    const isHold = phase.kind === 'hold-full' || phase.kind === 'hold-empty';
+    const endingProgress = meditationSessionState === 'ending'
+        ? smoothstep01(meditationEndingElapsed / MEDITATION_END_DURATION)
+        : 0;
+    const radius = minRadius + (maxRadius - minRadius) * fullness;
+
+    // During box breathing holds, ease a traveling ripple into and out of the three guide rings
+    // The central halo stays still so the hold reads clearly
+    const holdWaveEdge = Math.min(
+        smoothstep01(progress / 0.16),
+        smoothstep01((1 - progress) / 0.16)
+    );
+
+    // Fade outs
+    const labelFadeDuration = Math.min(0.65, phase.duration * 0.18);
+    const labelFadeIn = smoothstep01(breathTimer / labelFadeDuration);
+    const labelFadeOut = smoothstep01((phase.duration - breathTimer) / labelFadeDuration);
+    const visibility = 1 - endingProgress;
+
+    return {
+        phase,
+        progress,
+        radius: radius * (1 - endingProgress * 0.15),
+        visibility,
+        labelAlpha: Math.min(labelFadeIn, labelFadeOut) * visibility,
+        warm: phase.kind === 'inhale' || phase.kind === 'hold-full',
+        isHold,
+        holdWaveStrength: isHold ? holdWaveEdge : 0,
+        holdWavePhase: progress * Math.PI * 3
+    };
+}
+
+// Draws circle and ripples
+function strokeBreathingRing(centerX, centerY, radius, waveAmplitude, wavePhase) {
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.font = 'bold 24px Arial';
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.fillText(phase.label, centerX, centerY + 8);
-    ctx.restore();
+    if (waveAmplitude <= 0.01) {
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    } else {
+        const segments = 120;
+        const ripples = 6;
+        for (let index = 0; index <= segments; index++) {
+            const angle = (index / segments) * Math.PI * 2;
+            const wavedRadius = radius + Math.sin(angle * ripples - wavePhase) * waveAmplitude;
+            const x = centerX + Math.cos(angle) * wavedRadius;
+            const y = centerY + Math.sin(angle) * wavedRadius;
+            if (index === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+    }
+    ctx.stroke();
 }
 
 // ----------------------------------
-// Update for all speed values and UI when screen scaling changes
+// Draws a feathered breathing halo behind the moving target
+// Part of: Meditation mode, Overlay
+// ----------------------------------
+function drawBreathingHalo() {
+    const visual = breathingVisualState();
+    if (!visual || visual.visibility <= 0) return;
+
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const warm = visual.warm;
+    const gradient = ctx.createRadialGradient(centerX, centerY, visual.radius * 0.08,
+        centerX, centerY, visual.radius);
+    if (warm) {
+        gradient.addColorStop(0, 'rgba(255, 230, 187, 0.3)');
+        gradient.addColorStop(0.55, 'rgba(255, 211, 142, 0.2)');
+        gradient.addColorStop(1, 'rgba(255, 211, 142, 0)');
+    } else {
+        gradient.addColorStop(0, 'rgba(205, 196, 255, 0.3)');
+        gradient.addColorStop(0.55, 'rgba(156, 139, 236, 0.2)');
+        gradient.addColorStop(1, 'rgba(126, 105, 214, 0)');
+    }
+
+    ctx.save();
+    ctx.globalAlpha = visual.visibility;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, visual.radius, 0, Math.PI * 2);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    const ringColor = warm ? '255, 222, 163' : '205, 196, 255';
+    const ringBaseAlpha = 0.2;
+    const lineWidth = Math.max(1, Math.min(canvas.width, canvas.height) * 0.0018);
+    [0.72, 0.86, 1].forEach((scale, index) => {
+        const staggeredPhase = visual.holdWavePhase - index * 0.75;
+        const ringDrift = visual.isHold
+            ? Math.sin(staggeredPhase) * visual.radius * 0.006 * visual.holdWaveStrength
+            : 0;
+        const waveAmplitude = visual.radius * 0.013 * visual.holdWaveStrength;
+        const waveHighlight = visual.isHold
+            ? (0.5 + 0.5 * Math.sin(staggeredPhase)) * 0.035 * visual.holdWaveStrength
+            : 0;
+        ctx.strokeStyle = `rgba(${ringColor}, ${ringBaseAlpha - index * 0.018 + waveHighlight})`;
+        ctx.lineWidth = lineWidth * (visual.isHold ? 1.12 : 1);
+        strokeBreathingRing(
+            centerX,
+            centerY,
+            visual.radius * scale + ringDrift,
+            waveAmplitude,
+            staggeredPhase
+        );
+    });
+    ctx.restore();
+}
+
+// Draw only the phase label above the target - the halo is behind it
+function drawBreathingLabel() {
+    const visual = breathingVisualState();
+    if (!visual || visual.labelAlpha <= 0) return;
+
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    ctx.save();
+    ctx.globalAlpha = visual.labelAlpha * 0.92;
+    ctx.font = `600 ${Math.max(20, Math.min(canvas.width, canvas.height) * 0.025)}px 'Segoe UI', Arial, sans-serif`;
+    ctx.fillStyle = '#fff8ed';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(17, 11, 48, 0.35)';
+    ctx.shadowBlur = 10;
+    ctx.fillText(visual.phase.label, centerX, centerY);
+    ctx.restore();
+}
+
+function setMeditationCompletionVisible(visible) {
+    const completion = $('meditationCompletion');
+    if (!completion) return;
+    completion.hidden = !visible;
+    completion.setAttribute('aria-hidden', String(!visible));
+}
+
+// Restarts another meditation round at the currently selected duration
+function restartMeditationSession() {
+    if (!isMeditationMode) return;
+
+    const durationInput = $('roundDuration');
+    const requestedDuration = parseFloat(durationInput.value);
+    if (Number.isFinite(requestedDuration) && requestedDuration > 0) {
+        roundDuration = requestedDuration;
+    } else {
+        roundDuration = Number.isFinite(roundDuration) && roundDuration > 0 ? roundDuration : 300;
+        durationInput.value = roundDuration;
+    }
+
+    roundTimeRemaining = roundDuration;
+    meditationSessionState = 'running';
+    meditationEndingElapsed = 0;
+    meditationStartingElapsed = 0;
+    breathPhaseIndex = 0;
+    breathTimer = 0;
+    flashTimeRemaining = 0;
+    if (!meditationMotionState) {
+        setupMeditationMotion();
+    } else {
+        meditationMotionState.targetHeading = meditationMotionState.heading;
+        meditationMotionState.turnTimer = randomMeditationTurnDelay();
+    }
+    setMeditationCompletionVisible(false);
+    $('roundTimeDisplay').innerText = formatTimeMS(roundTimeRemaining);
+}
+
+// ----------------------------------
+// Update all effective speed values and UI when the active monitor changes
 // Part of: Screen scaling, Level system
 // ----------------------------------
+function scaleReferenceSpeed(referenceSpeed) {
+    return parseFloat((referenceSpeed * resolutionScale).toFixed(2));
+}
+
+function unscaleEffectiveSpeed(effectiveSpeed) {
+    return parseFloat((effectiveSpeed / Math.max(resolutionScale, 0.0001)).toFixed(2));
+}
+
+function scaleReferenceSpeeds(referenceSpeeds) {
+    return referenceSpeeds.map(scaleReferenceSpeed);
+}
+
+// The menu shows native resolution px/s
+// Canvas movement is expressed in CSS pixels, 
+// so convert the displayed speed before using it for motion
+// This keeps the calibration correct when Windows display scaling makes
+// one CSS pixel span multiple native display pixels
+function effectiveSpeedToCanvasSpeed(effectiveSpeed) {
+    return effectiveSpeed / Math.max(displayPixelRatio, 0.1);
+}
+
+function getAutomaticDisplayMetrics() {
+    const pixelRatio = Math.max(0.1, window.devicePixelRatio || 1);
+    const logicalWidth = Math.max(1, window.screen?.width || canvas.width);
+    const logicalHeight = Math.max(1, window.screen?.height || canvas.height);
+    const nativeWidth = Math.max(1, Math.round(logicalWidth * pixelRatio));
+    const nativeHeight = Math.max(1, Math.round(logicalHeight * pixelRatio));
+    const nativeShortSide = Math.min(nativeWidth, nativeHeight);
+
+    return {
+        pixelRatio,
+        nativeWidth,
+        nativeHeight,
+        scale: Math.max(0.1, nativeShortSide / FHD_REFERENCE_SHORT_SIDE)
+    };
+}
+
+function getDisplaySignature(metrics) {
+    return `${metrics.nativeWidth}x${metrics.nativeHeight}@${metrics.pixelRatio}`;
+}
+
+function checkForDisplayChange() {
+    const metrics = getAutomaticDisplayMetrics();
+    const signature = getDisplaySignature(metrics);
+    if (lastDisplaySignature && signature !== lastDisplaySignature) {
+        handleViewportResize();
+    }
+}
+
+function updateScreenScaleDisplay() {
+    const display = document.getElementById('screenScaleDisplay');
+    if (!display) return;
+    display.textContent = `Auto ${detectedDisplayWidth} × ${detectedDisplayHeight} (${resolutionScale.toFixed(2)}×)`;
+}
+
 function updateScreenScaling() {
-    resolutionScale = parseFloat(document.getElementById('screenTypeSelect').value);
-    allLevelSpeeds = generateAllSpeeds(baseSpeeds, tiers, levelsPerTier);
-    const levelIndex = tiers.indexOf(selectedTier) * levelsPerTier + (selectedSublevel - 1);
-    const speeds = allLevelSpeeds[levelIndex].map(s => parseFloat((s * resolutionScale).toFixed(2)));
+    const metrics = getAutomaticDisplayMetrics();
+    resolutionScale = metrics.scale;
+    displayPixelRatio = metrics.pixelRatio;
+    detectedDisplayWidth = metrics.nativeWidth;
+    detectedDisplayHeight = metrics.nativeHeight;
+    lastDisplaySignature = getDisplaySignature(metrics);
+    updateScreenScaleDisplay();
+
+    let speeds;
+    if (isMeditationMode) {
+        meditationSpeedsScaled = scaleReferenceSpeeds(meditationSpeeds);
+        speeds = [...meditationSpeedsScaled];
+    } else {
+        speeds = scaleReferenceSpeeds(referenceLevelSpeeds);
+    }
+
     levelSpeeds = [...speeds];
     speedInputs.forEach((input, i) => input.value = speeds[i]);
     speedPercent = levelSpeeds[level - 1];
     document.getElementById('speedInput').value = speedPercent;
-    resetLevel();
+
+    if (isABCMode) {
+        initABCMode();
+    } else if (isMeditationMode) {
+        // Meditation - preserve its position
+        // and heading across ordinary window resizes and monitor moves
+        pos.x = Math.max(ballRadius, Math.min(canvas.width - ballRadius, pos.x));
+        pos.y = Math.max(ballRadius, Math.min(canvas.height - ballRadius, pos.y));
+    } else {
+        // Rebuild geometry for the new canvas without restarting the active round
+        resetLevel(false);
+    }
 }
     
 // ==============================
@@ -535,11 +899,6 @@ let sizePercent  = parseFloat(document.getElementById('sizeInput').value);
 // Updates colors from pickers
 document.getElementById('ballColor').addEventListener('change', e => ballColor = e.target.value);
 document.getElementById('dotColor').addEventListener('change', e => dotColor = e.target.value);
-document.getElementById('bgColor').addEventListener('change', e => {
-    backgroundColor = e.target.value;
-});
-
-
 // ==============================
 // Background & Flash Color Listeners
 // Part of: Color settings, UI interaction
@@ -590,6 +949,170 @@ function drawPreview() {
     pctx.fill();
 }
 
+function hexToRgb(hex) {
+    const normalized = String(hex).replace('#', '');
+    if (!/^[0-9a-f]{6}$/i.test(normalized)) return null;
+    return {
+        r: parseInt(normalized.slice(0, 2), 16),
+        g: parseInt(normalized.slice(2, 4), 16),
+        b: parseInt(normalized.slice(4, 6), 16)
+    };
+}
+
+function relativeLuminance(hex) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return 0;
+    const channels = [rgb.r, rgb.g, rgb.b].map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045
+            ? channel / 12.92
+            : Math.pow((channel + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastRatio(first, second) {
+    const firstLuminance = relativeLuminance(first);
+    const secondLuminance = relativeLuminance(second);
+    const lighter = Math.max(firstLuminance, secondLuminance);
+    const darker = Math.min(firstLuminance, secondLuminance);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
+function randomColorCycleDelay() {
+    return COLOR_CYCLE_MIN_SECONDS +
+        Math.random() * (COLOR_CYCLE_MAX_SECONDS - COLOR_CYCLE_MIN_SECONDS);
+}
+
+function compatibleTargetColorPairs(background = $('bgColor').value) {
+    return TARGET_COLOR_PAIRS
+        .map((pair, index) => {
+            const targetBackgroundContrast = contrastRatio(pair.target, background);
+            const dotTargetContrast = contrastRatio(pair.dot, pair.target);
+            return { pair, index, targetBackgroundContrast, dotTargetContrast };
+        })
+        .filter(candidate =>
+            candidate.targetBackgroundContrast >= MIN_TARGET_BACKGROUND_CONTRAST &&
+            candidate.dotTargetContrast >= MIN_DOT_TARGET_CONTRAST &&
+            candidate.dotTargetContrast >= Math.min(candidate.targetBackgroundContrast, 7)
+        );
+}
+
+function setThemeColors(target, dot, background) {
+    ballColor = target;
+    dotColor = dot;
+    backgroundColor = background;
+    $('ballColor').value = target;
+    $('dotColor').value = dot;
+    $('bgColor').value = background;
+    document.body.style.backgroundColor = background;
+    drawPreview();
+}
+
+function applyNextColorTheme() {
+    const currentBackground = $('bgColor').value.toLowerCase();
+    let backgrounds = COLOR_CYCLE_BACKGROUNDS
+        .map((background, index) => ({ background, index }))
+        .filter(candidate =>
+            candidate.index !== lastColorBackgroundIndex &&
+            candidate.background !== currentBackground
+        );
+    if (!backgrounds.length) {
+        backgrounds = COLOR_CYCLE_BACKGROUNDS.map((background, index) => ({ background, index }));
+    }
+
+    const selectedBackground = backgrounds[Math.floor(Math.random() * backgrounds.length)];
+    let candidates = compatibleTargetColorPairs(selectedBackground.background);
+    const currentTarget = $('ballColor').value.toLowerCase();
+    const currentDot = $('dotColor').value.toLowerCase();
+    const nonRepeating = candidates.filter(candidate =>
+        candidate.index !== lastColorPairIndex &&
+        (candidate.pair.target !== currentTarget || candidate.pair.dot !== currentDot)
+    );
+    if (nonRepeating.length) candidates = nonRepeating;
+
+    // high contrast fallback
+    if (!candidates.length) {
+        candidates = [7, 15]
+            .map(index => ({
+                pair: TARGET_COLOR_PAIRS[index],
+                index,
+                targetBackgroundContrast: contrastRatio(
+                    TARGET_COLOR_PAIRS[index].target,
+                    selectedBackground.background
+                )
+            }))
+            .sort((first, second) => second.targetBackgroundContrast - first.targetBackgroundContrast)
+            .slice(0, 1);
+    }
+
+    const selected = candidates[Math.floor(Math.random() * candidates.length)];
+    lastColorPairIndex = selected.index;
+    lastColorBackgroundIndex = selectedBackground.index;
+    setThemeColors(selected.pair.target, selected.pair.dot, selectedBackground.background);
+    colorCycleTimeRemaining = randomColorCycleDelay();
+}
+
+function updateColorCycleControls() {
+    const cycling = $('colorCycleToggle').checked && !isMeditationMode;
+    $('colorCycleToggle').disabled = isMeditationMode;
+    $('colorCycleToggle').title = isMeditationMode
+        ? 'Color cycling is paused in Meditation Mode'
+        : 'Switch background and target colors every 3 to 10 seconds';
+    $('ballColor').disabled = cycling;
+    $('dotColor').disabled = cycling;
+    $('bgColor').disabled = cycling;
+}
+
+function initializeColorCycleFromCurrentSettings() {
+    colorCycleTimeRemaining = 0;
+    lastColorPairIndex = -1;
+    lastColorBackgroundIndex = -1;
+    colorCycleBaseColors = $('colorCycleToggle').checked
+        ? {
+            target: $('ballColor').value,
+            dot: $('dotColor').value,
+            background: $('bgColor').value
+        }
+        : null;
+    updateColorCycleControls();
+    if ($('colorCycleToggle').checked && !isMeditationMode) {
+        colorCycleTimeRemaining = randomColorCycleDelay();
+    }
+}
+
+function updateColorCycle(deltaTime) {
+    if (!$('colorCycleToggle').checked || isMeditationMode) return;
+    colorCycleTimeRemaining -= deltaTime;
+    if (colorCycleTimeRemaining <= 0) applyNextColorTheme();
+}
+
+$('colorCycleToggle').addEventListener('change', () => {
+    if ($('colorCycleToggle').checked) {
+        colorCycleBaseColors = {
+            target: $('ballColor').value,
+            dot: $('dotColor').value,
+            background: $('bgColor').value
+        };
+        updateColorCycleControls();
+        if (!isMeditationMode) applyNextColorTheme();
+        return;
+    }
+
+    updateColorCycleControls();
+    colorCycleTimeRemaining = 0;
+    lastColorPairIndex = -1;
+    lastColorBackgroundIndex = -1;
+    if (colorCycleBaseColors) {
+        setThemeColors(
+            colorCycleBaseColors.target,
+            colorCycleBaseColors.dot,
+            colorCycleBaseColors.background
+        );
+    }
+    colorCycleBaseColors = null;
+});
+
 // Redraw the preview whenever size or any color changes
 ['sizeInput', 'ballColor', 'dotColor', 'bgColor'].forEach(id => {
     const el = document.getElementById(id);
@@ -611,6 +1134,9 @@ document.getElementById('speedInput').addEventListener('input', e => {
     if (!isNaN(value)) {
         speedPercent = value;
         levelSpeeds[level - 1] = value;
+        if (!isMeditationMode) {
+            referenceLevelSpeeds[level - 1] = unscaleEffectiveSpeed(value);
+        }
         speedInputs[level - 1].value = value;
     }
 });
@@ -625,6 +1151,9 @@ function changeSpeed(directionFactor) {
     speedPercent *= (1 + directionFactor * increment / 100);
     speedPercent = parseFloat(speedPercent.toFixed(2));
     levelSpeeds[level - 1] = speedPercent;
+    if (!isMeditationMode) {
+        referenceLevelSpeeds[level - 1] = unscaleEffectiveSpeed(speedPercent);
+    }
     document.getElementById('speedInput').value = speedPercent;
     speedInputs[level - 1].value = speedPercent;
 }
@@ -644,11 +1173,12 @@ function applyClampedSizeInput() {
     let value = parseFloat(sizeInput.value);
     if (isNaN(value)) return;
 
-    // Clamp value between 15 and 200, mostly for peek level 8
+    // Clamp value between 15 and 200, mostly for peek level 6
     value = Math.min(200, Math.max(15, value));
     sizePercent = value;
     ballRadius = baseBallRadius * (sizePercent / 100);
     sizeInput.value = value; // clamp the field
+    if (level === 2 && spiralArcLookup) rebuildSpiralArcLookup();
 }
 
 // When the input loses focus, or Enter is pressed, clamp and apply the value
@@ -668,6 +1198,7 @@ function changeSize(delta) {
     sizePercent = Math.min(200, Math.max(15, sizePercent + delta));
     document.getElementById('sizeInput').value = sizePercent;
     ballRadius = baseBallRadius * (sizePercent / 100);
+    if (level === 2 && spiralArcLookup) rebuildSpiralArcLookup();
     if (typeof drawPreview === 'function') drawPreview();
 }
     
@@ -705,7 +1236,7 @@ let readingUIEnabled = false;
 let readingUICode = null;   // { text, corner, fontSize, timeLeft }
 const READING_UI_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
-// Pick a fresh 4char code, a corner different from the last, and a size.
+// Pick a fresh 4char code, a corner different from the last, and a size
 function rollReadingUICode() {
     let text = '';
     for (let i = 0; i < 4; i++) {
@@ -718,12 +1249,12 @@ function rollReadingUICode() {
     } while (readingUICode && corner === readingUICode.corner);
     // Reasonable size that varies a bit each spawn (scaled to screen)
     const base = Math.min(canvas.width, canvas.height) * 0.045;
-    const fontSize = base * (0.6 + Math.random() * 0.6); // ±~ variation
+    const fontSize = base * (0.6 + Math.random() * 0.6); // +-~ variation
     readingUICode = {
         text,
         corner,
         fontSize,
-        timeLeft: 1 + Math.random() * 4, // visible 1-5 seconds
+        timeLeft: 1 + Math.random() * 4, // visibility 1-5 seconds
     };
 }
 
@@ -756,10 +1287,9 @@ if (readingUIToggle) {
 // Part of: Drawing/rendering, depth illusion
 // ==============================
 // Fakes a z-axis by smoothly scaling the drawn target up (toward viewer) and down (away)
-// Affects DRAWING ONLY ballRadius stays the true size so all movement, bouncing, and collision math is unaffected.
-// The player's chosen size is HOME (rest position)
-// The target breathes around it, drifting toward the viewer (grow) and away (shrink)
-// Each side is independently capped to its room before the limits [SIZE_MIN, SIZE_MAX], so the drawn size never crosses them.
+// Affects DRAWING ONLY ballRadius stays the true size so all movement, bouncing, and collision math is unaffected
+// The player's chosen size is base and target breathes around it, drifting toward the viewer (grow) and away (shrink)
+// Each side is independently capped to its room before the limits [SIZE_MIN, SIZE_MAX], so the drawn size never crosses them
 let is3DMode = false;
 let depthT = 0; // Phase of the depth oscillation
 const depthGrowPoints = 25;   // Swing toward viewer (bigger), in size points
@@ -817,22 +1347,49 @@ let pos = { x: canvas.width / 2, y: canvas.height / 2 }; // Ball position
 let vel = { x: baseSpeed, y: 0 }; // Ball velocity (level 6)
 let direction = 1; // Ball movement direction (levels 1 and 2)
 // Level 1 merged axis state: alternates horizontal/vertical after a random
-// number of single traversals (crossings) on the current axis.
+// number of single crossings on the current axis
 let axisMode = 'h';            // 'h' = horizontal, 'v' = vertical
 let axisCrossingsLeft = 2;     // traversals remaining on this axis before switching
     
 // ==============================
-// Level 3 (Spiral) Variables (main/global declarations)
+// Level 2 (Spiral) Variables (main/global declarations)
 // Part of: Ball movement
 // ==============================
+const SPIRAL_INNER_RADIUS_FRACTION = 0.08;
+const SPIRAL_MIN_TURNS = 1.25;
+const SPIRAL_MAX_TURNS = 2;
 let spiralProgress = 0; // Spiral animation progress
 let spiralForward = true; // Spiral direction
 let spiralScale = 1; // Spiral scaling factor
+let spiralTurns = 1.5;
 let spiralRotation = 0; // Spiral rotation angle
 let spiralCW = true; // Spiral clockwise/counterclockwise
+let spiralDistance = 0; // Arc length distance travelled on the current spiral
+let spiralArcLookup = null;
+
+function spiralPointAt(progress) {
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const outerRadius = (Math.min(canvas.width, canvas.height) / 3) * spiralScale;
+    // Keep the center curve open and proportional to the generated spiral
+    // ballRadius remains the floor for unusually large target sizes
+    const innerRadius = Math.max(ballRadius, outerRadius * SPIRAL_INNER_RADIUS_FRACTION);
+    const theta = (spiralCW ? 1 : -1) * 2 * Math.PI * spiralTurns * progress;
+    const radius = innerRadius + progress * (outerRadius - innerRadius);
+    const angle = theta + spiralRotation;
+    return {
+        x: centerX + radius * Math.cos(angle),
+        y: centerY + radius * Math.sin(angle)
+    };
+}
+
+function rebuildSpiralArcLookup() {
+    spiralArcLookup = buildArcLengthLookup(spiralPointAt);
+    spiralDistance = arcDistanceAtParameter(spiralArcLookup, spiralProgress);
+}
     
 // ==============================
-// Levels 4 & 5 (Figure Eight) Variables (main/global declarations)
+// Level 3 (Figure Eight) Variables (main/global declarations)
 // Part of: Ball movement
 // ==============================
 let fig8T = 0; // Progress along the loop, 0 -> 2*PI (one full figure 8)
@@ -842,14 +1399,55 @@ let fig8Mirror = 1; // Traversal direction: +1 / -1 (clockwise vs counterclockwi
 let fig8Angle = 0; // Orientation of the whole figure 8 (one of 6 clock hand angles)
 let lastFig8Angle = null; // Previous orientation, to avoid an immediate repeat
 let fig8Center = { x: 0, y: 0 }; // Where the 8 is planted (jittered near screen center)
+let fig8Distance = 0; // Arc- ength distance travelled around the current loop
+let fig8ArcLookup = null;
 
 // Six distinct orientations at 30° steps
 // A figure 8 has 180° rotational symmetry so 0..150° already covers every visually distinct clock hand direction
 // (e.g. 12 o'clock and 6 o'clock look identical)
 const FIG8_ANGLES = [0, Math.PI/6, Math.PI/3, Math.PI/2, 2*Math.PI/3, 5*Math.PI/6];
-// Plant jitter as a fraction of each screen dimension (tight box around center)
+// Plant jitter as a fraction of each screen dimension (box around center)
 const FIG8_CENTER_JITTER_X = 0.08;
 const FIG8_CENTER_JITTER_Y = 0.08;
+const FIG8_LOBE_HEIGHT_RATIO = 0.5;
+const FIG8_CENTER_PULL_RATIO = 0.55;
+const FIG8_CLOSURE_HOLD = 0.06;
+let fig8ClosurePause = 0;
+
+function roundedFigureEightBasePoint(phase, amplitude) {
+    const fullTurn = 2 * Math.PI;
+    const wrapped = ((phase % fullTurn) + fullTurn) % fullTurn;
+    const isRightLobe = wrapped < Math.PI;
+    const lobePhase = isRightLobe ? wrapped : wrapped - Math.PI;
+    const loopAngle = lobePhase * 2;
+    const side = isRightLobe ? 1 : -1;
+
+    const centerPull = amplitude * FIG8_CENTER_PULL_RATIO;
+    const roundRadius = (amplitude - centerPull) / 2;
+    return {
+        x: side * (
+            roundRadius * (1 - Math.cos(loopAngle)) +
+            centerPull * Math.sin(loopAngle / 2)
+        ),
+        y: amplitude * FIG8_LOBE_HEIGHT_RATIO * Math.sin(loopAngle)
+    };
+}
+
+function figureEightPointAt(pathParameter) {
+    const amplitude = (Math.min(canvas.width, canvas.height) / 4) * fig8Scale;
+    const phase = fig8Offset + pathParameter * fig8Mirror;
+    const basePoint = roundedFigureEightBasePoint(phase, amplitude);
+    const cosAngle = Math.cos(fig8Angle);
+    const sinAngle = Math.sin(fig8Angle);
+    return {
+        x: fig8Center.x + basePoint.x * cosAngle - basePoint.y * sinAngle,
+        y: fig8Center.y + basePoint.x * sinAngle + basePoint.y * cosAngle
+    };
+}
+
+function rebuildFig8ArcLookup() {
+    fig8ArcLookup = buildArcLengthLookup(figureEightPointAt, 2 * Math.PI);
+}
 
 let spawnDelay = 0; // Delay before respawning in figure eight levels
 
@@ -858,6 +1456,8 @@ let spawnDelay = 0; // Delay before respawning in figure eight levels
 // size, traversal direction (50/50), spawn phase (anywhere on the path)
 function resetFig8() {
     fig8T = 0;
+    fig8Distance = 0;
+    fig8ClosurePause = 0;
 
     // Plant the 8 at a jittered point around screen center
     fig8Center = {
@@ -882,6 +1482,11 @@ function resetFig8() {
     // Spawn phase: start anywhere on the path
     // The loop ends one full 2*PI later, i.e. when the target returns to the same point
     fig8Offset = Math.random() * 2 * Math.PI;
+
+    rebuildFig8ArcLookup();
+    const startPoint = figureEightPointAt(0);
+    pos.x = startPoint.x;
+    pos.y = startPoint.y;
 
     spawnDelay = 0.1; // brief pause to signal a new shape is incoming
 }
@@ -927,16 +1532,579 @@ let isPaused = false; // Whether the game is paused (freezes movement + timers)
 let roundDuration = parseFloat(document.getElementById('roundDuration').value); // Duration of each round in seconds
 let roundTimeRemaining = roundDuration; // Time left in the current round
 let flashTimeRemaining = 0; // Time left for the flash overlay (after round ends)
+const fpsDisplay = document.getElementById('fpsDisplay'); // Cached once; reused by the FPS monitor
+let fpsSampleFrames = 0; // Frames collected for the current FPS sample
+let fpsSampleTime = 0; // Seconds covered by the current FPS sample
+const MAX_SIMULATION_DELTA = 0.05; // Never advance simulation by more than 50 ms in one frame
+const INTERRUPTION_DELTA = 0.25; // Longer gaps are interruptions and are not simulated
 
 // ==============================
 // Round Duration Change Listener
 // Part of: Timer system, UI interaction
 // ==============================
 // Keeps UI and logic in sync
-document.getElementById('roundDuration').addEventListener('change', e => {
-    roundDuration = parseFloat(e.target.value);
+// invalid/empty edits safely restore the last usable duration
+const roundDurationInput = document.getElementById('roundDuration');
+function applyRoundDurationInput() {
+    const requestedDuration = parseFloat(roundDurationInput.value);
+    if (!Number.isFinite(requestedDuration) || requestedDuration <= 0) {
+        roundDurationInput.value = roundDuration;
+        return;
+    }
+
+    roundDuration = requestedDuration;
     roundTimeRemaining = roundDuration;
+    if (isMeditationMode) {
+        meditationSessionState = 'running';
+        meditationEndingElapsed = 0;
+        meditationStartingElapsed = 0;
+        breathPhaseIndex = 0;
+        breathTimer = 0;
+        setMeditationCompletionVisible(false);
+    }
+}
+roundDurationInput.addEventListener('change', applyRoundDurationInput);
+roundDurationInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        applyRoundDurationInput();
+        roundDurationInput.blur();
+    }
 });
+
+// ==============================
+// Local Training Profiles
+// Part of: Settings persistence, Privacy controls
+// ==============================
+const GAZELAB_STORAGE_PREFIX = 'gazelab.';
+const PROFILE_STORAGE_KEY = `${GAZELAB_STORAGE_PREFIX}profiles.v1`;
+const PROFILE_SCHEMA_VERSION = 1;
+const MAX_PROFILE_NAME_LENGTH = 40;
+const MAX_PROFILE_COUNT = 50;
+const PROFILE_CHECKBOX_IDS = [
+    'disableFlashToggle',
+    'autoNextToggle',
+    'colorCycleToggle',
+    'hashtagToggle',
+    'verticalStripesToggle',
+    'horizontalStripesToggle',
+    'solidStripesToggle',
+    'depth3DToggle',
+    'readingUIToggle',
+    'boxBreathingToggle'
+];
+
+function setProfileStatus(message, tone = '') {
+    const status = $('profileStatus');
+    if (!status) return;
+    status.textContent = message;
+    if (tone) status.dataset.tone = tone;
+    else delete status.dataset.tone;
+}
+
+function normalizeProfileName(value) {
+    return String(value || '')
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, MAX_PROFILE_NAME_LENGTH);
+}
+
+function createProfileId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readProfileRecords() {
+    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== PROFILE_SCHEMA_VERSION || !Array.isArray(parsed.profiles)) {
+        throw new Error('The saved profile data has an unsupported format.');
+    }
+
+    return parsed.profiles
+        .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
+        .slice(0, MAX_PROFILE_COUNT);
+}
+
+function writeProfileRecords(profiles) {
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({
+        version: PROFILE_SCHEMA_VERSION,
+        profiles
+    }));
+}
+
+function selectedProfileRecord(profiles) {
+    const selectedId = $('profileSelect').value;
+    return profiles.find(profile => profile.id === selectedId) || null;
+}
+
+function updateProfileButtons() {
+    const selected = Boolean($('profileSelect').value);
+    const specialModeActive = isMeditationMode || isABCMode;
+    const modeMessage = 'Exit Meditation or ABC Mode to save or load profiles.';
+    $('profileSaveButton').disabled = specialModeActive;
+    $('profileLoadButton').disabled = specialModeActive || !selected;
+    $('profileDeleteButton').disabled = !selected;
+    $('profileSaveButton').title = specialModeActive ? modeMessage : 'Save the current settings';
+    $('profileLoadButton').title = specialModeActive ? modeMessage : 'Load the selected profile';
+}
+
+function setProfileManagerExpanded(expanded) {
+    const collapseButton = $('profileCollapseButton');
+    const content = $('profileManagerContent');
+    collapseButton.setAttribute('aria-expanded', String(expanded));
+    content.hidden = !expanded;
+    $('profileManager').classList.toggle('is-collapsed', !expanded);
+}
+
+$('profileCollapseButton').addEventListener('click', () => {
+    const expanded = $('profileCollapseButton').getAttribute('aria-expanded') === 'true';
+    setProfileManagerExpanded(!expanded);
+});
+
+function refreshProfileSelect(selectedId = '') {
+    const select = $('profileSelect');
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select a profile...';
+    select.replaceChildren(placeholder);
+
+    let profiles;
+    try {
+        profiles = readProfileRecords();
+    } catch (error) {
+        setProfileStatus(error.message || 'Saved profiles could not be read.', 'error');
+        updateProfileButtons();
+        return [];
+    }
+
+    profiles
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+        .forEach(profile => {
+            const option = document.createElement('option');
+            option.value = profile.id;
+            option.textContent = normalizeProfileName(profile.name) || 'Unnamed profile';
+            select.appendChild(option);
+        });
+
+    if (selectedId && profiles.some(profile => profile.id === selectedId)) {
+        select.value = selectedId;
+    }
+    updateProfileButtons();
+    return profiles;
+}
+
+function currentProfileSettings() {
+    const displayedSpeeds = speedInputs.map(input => parseFloat(input.value));
+    if (displayedSpeeds.some(speed => !Number.isFinite(speed) || speed < 0)) {
+        throw new Error('Every advanced level speed must contain a valid non-negative number.');
+    }
+    const requestedSize = parseFloat($('sizeInput').value);
+    if (!Number.isFinite(requestedSize)) {
+        throw new Error('Target size must contain a valid number.');
+    }
+
+    applyClampedSizeInput();
+    applyRoundDurationInput();
+
+    const referenceSpeeds = referenceLevelSpeeds.map(speed => Number(speed));
+    if (referenceSpeeds.length !== maxLevel || referenceSpeeds.some(speed => !Number.isFinite(speed) || speed < 0)) {
+        throw new Error('Every advanced level speed must contain a valid non-negative number.');
+    }
+
+    const checkboxes = {};
+    PROFILE_CHECKBOX_IDS.forEach(id => {
+        checkboxes[id] = Boolean($(id).checked);
+    });
+
+    return {
+        tier: $('tierSelect').value,
+        sublevel: parseInt($('subLevelInput').value, 10),
+        level,
+        referenceSpeeds: referenceSpeeds.map(speed => parseFloat(speed.toFixed(6))),
+        speedIncrement: $('speedIncrement').value,
+        sizePercent: parseFloat($('sizeInput').value),
+        roundDuration: parseFloat($('roundDuration').value),
+        colors: {
+            ball: $('ballColor').value,
+            dot: $('dotColor').value,
+            background: $('bgColor').value,
+            flash: $('flashColor').value
+        },
+        checkboxes
+    };
+}
+
+function validatedProfileSettings(settings) {
+    if (!settings || typeof settings !== 'object') return null;
+
+    const tier = String(settings.tier);
+    const sublevel = Number(settings.sublevel);
+    const savedLevel = Number(settings.level);
+    const size = Number(settings.sizePercent);
+    const duration = Number(settings.roundDuration);
+    const speedIncrement = String(settings.speedIncrement);
+    const speedIncrementValues = Array.from($('speedIncrement').options, option => option.value);
+    const colorPattern = /^#[0-9a-f]{6}$/i;
+    const colors = settings.colors;
+
+    if (!tiers.includes(tier) || !Number.isInteger(sublevel) || sublevel < 1 || sublevel > levelsPerTier) return null;
+    if (!Number.isInteger(savedLevel) || savedLevel < 1 || savedLevel > maxLevel) return null;
+    if (!Array.isArray(settings.referenceSpeeds) || settings.referenceSpeeds.length !== maxLevel) return null;
+    const referenceSpeeds = settings.referenceSpeeds.map(Number);
+    if (referenceSpeeds.some(speed => !Number.isFinite(speed) || speed < 0 || speed > 1000000)) return null;
+    if (!Number.isFinite(size) || size < 15 || size > 200) return null;
+    if (!Number.isFinite(duration) || duration < 1 || duration > 86400) return null;
+    if (!speedIncrementValues.includes(speedIncrement)) return null;
+    if (!colors || !colorPattern.test(colors.ball) || !colorPattern.test(colors.dot) ||
+        !colorPattern.test(colors.background) || !colorPattern.test(colors.flash)) return null;
+    if (!settings.checkboxes || typeof settings.checkboxes !== 'object') return null;
+
+    const checkboxes = {};
+    for (const id of PROFILE_CHECKBOX_IDS) {
+        if (typeof settings.checkboxes[id] === 'boolean') {
+            checkboxes[id] = settings.checkboxes[id];
+        } else if (id === 'colorCycleToggle') {
+            checkboxes[id] = false;
+        } else {
+            return null;
+        }
+    }
+
+    return {
+        tier,
+        sublevel,
+        level: savedLevel,
+        referenceSpeeds,
+        speedIncrement,
+        sizePercent: size,
+        roundDuration: duration,
+        colors: {
+            ball: colors.ball,
+            dot: colors.dot,
+            background: colors.background,
+            flash: colors.flash
+        },
+        checkboxes
+    };
+}
+
+function saveCurrentProfile() {
+    if (isMeditationMode || isABCMode) {
+        setProfileStatus('Exit Meditation or ABC Mode before saving a profile.', 'error');
+        return;
+    }
+
+    const nameInput = $('profileName');
+    const name = normalizeProfileName(nameInput.value);
+    nameInput.value = name;
+    if (!name) {
+        setProfileStatus('Enter a profile name first.', 'error');
+        nameInput.focus();
+        return;
+    }
+
+    try {
+        const profiles = readProfileRecords();
+        const existing = profiles.find(profile => profile.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0);
+        if (!existing && profiles.length >= MAX_PROFILE_COUNT) {
+            setProfileStatus(`The profile limit is ${MAX_PROFILE_COUNT}. Delete one before saving another.`, 'error');
+            return;
+        }
+
+        const settings = currentProfileSettings();
+        const timestamp = new Date().toISOString();
+        let savedId;
+        if (existing) {
+            existing.name = name;
+            existing.settings = settings;
+            existing.updatedAt = timestamp;
+            savedId = existing.id;
+        } else {
+            savedId = createProfileId();
+            profiles.push({ id: savedId, name, settings, createdAt: timestamp, updatedAt: timestamp });
+        }
+
+        writeProfileRecords(profiles);
+        refreshProfileSelect(savedId);
+        setProfileStatus(existing ? `Updated “${name}”.` : `Saved “${name}”.`, 'success');
+    } catch (error) {
+        setProfileStatus(error.message || 'The profile could not be saved in this browser.', 'error');
+    }
+}
+
+function applyProfileSettings(settings) {
+    selectedTier = settings.tier;
+    selectedSublevel = settings.sublevel;
+    $('tierSelect').value = selectedTier;
+    $('subLevelInput').value = String(selectedSublevel);
+    allLevelSpeeds = generateAllSpeeds(baseSpeeds, tiers, levelsPerTier);
+
+    referenceLevelSpeeds = [...settings.referenceSpeeds];
+    levelSpeeds = scaleReferenceSpeeds(referenceLevelSpeeds);
+    speedInputs.forEach((input, index) => {
+        input.value = levelSpeeds[index];
+    });
+
+    level = settings.level;
+    speedPercent = levelSpeeds[level - 1];
+    $('speedInput').value = speedPercent;
+    $('speedIncrement').value = settings.speedIncrement;
+
+    sizePercent = settings.sizePercent;
+    $('sizeInput').value = sizePercent;
+    ballRadius = baseBallRadius * (sizePercent / 100);
+    roundDuration = settings.roundDuration;
+    $('roundDuration').value = roundDuration;
+    roundTimeRemaining = roundDuration;
+    flashTimeRemaining = 0;
+
+    ballColor = settings.colors.ball;
+    dotColor = settings.colors.dot;
+    backgroundColor = settings.colors.background;
+    flashColor = settings.colors.flash;
+    $('ballColor').value = ballColor;
+    $('dotColor').value = dotColor;
+    $('bgColor').value = backgroundColor;
+    $('flashColor').value = flashColor;
+    document.body.style.backgroundColor = backgroundColor;
+
+    PROFILE_CHECKBOX_IDS.forEach(id => {
+        $(id).checked = settings.checkboxes[id];
+    });
+    initializeColorCycleFromCurrentSettings();
+    hashtagOverlay = settings.checkboxes.hashtagToggle;
+    verticalStripesOverlay = settings.checkboxes.verticalStripesToggle;
+    horizontalStripesOverlay = settings.checkboxes.horizontalStripesToggle;
+    solidStripes = settings.checkboxes.solidStripesToggle;
+    readingUIEnabled = settings.checkboxes.readingUIToggle;
+    readingUICode = null;
+    if (readingUIEnabled) rollReadingUICode();
+    is3DMode = settings.checkboxes.depth3DToggle;
+    depthT = 0;
+    depthScale = 1;
+    breathPatternName = settings.checkboxes.boxBreathingToggle ? 'box' : 'relaxed';
+    breathPhaseIndex = 0;
+    breathTimer = 0;
+
+    $('levelDisplay').innerText = `Level ${level}`;
+    resetLevel();
+    drawPreview();
+}
+
+function loadSelectedProfile() {
+    if (isMeditationMode || isABCMode) {
+        setProfileStatus('Exit Meditation or ABC Mode before loading a profile.', 'error');
+        return;
+    }
+
+    try {
+        const profiles = readProfileRecords();
+        const profile = selectedProfileRecord(profiles);
+        if (!profile) {
+            setProfileStatus('Select a profile to load.', 'error');
+            return;
+        }
+
+        const settings = validatedProfileSettings(profile.settings);
+        if (!settings) {
+            setProfileStatus('That profile is invalid or was created by an unsupported version.', 'error');
+            return;
+        }
+
+        applyProfileSettings(settings);
+        $('profileName').value = normalizeProfileName(profile.name);
+        setProfileStatus(`Loaded “${normalizeProfileName(profile.name)}”.`, 'success');
+    } catch (error) {
+        setProfileStatus(error.message || 'The selected profile could not be loaded.', 'error');
+    }
+}
+
+let appConfirmResolver = null;
+let appConfirmPreviousFocus = null;
+
+function closeAppConfirmation(confirmed) {
+    if (!appConfirmResolver) return;
+    const resolver = appConfirmResolver;
+    appConfirmResolver = null;
+    const overlay = $('appConfirmOverlay');
+    overlay.hidden = true;
+    overlay.setAttribute('aria-hidden', 'true');
+
+    if (appConfirmPreviousFocus instanceof HTMLElement && appConfirmPreviousFocus.isConnected) {
+        appConfirmPreviousFocus.focus();
+    }
+    appConfirmPreviousFocus = null;
+    resolver(confirmed);
+}
+
+function requestAppConfirmation({ title, message, confirmLabel, danger = true }) {
+    if (appConfirmResolver) return Promise.resolve(false);
+
+    const overlay = $('appConfirmOverlay');
+    const confirmButton = $('appConfirmAccept');
+    $('appConfirmTitle').textContent = title;
+    $('appConfirmMessage').textContent = message;
+    confirmButton.textContent = confirmLabel;
+    confirmButton.dataset.danger = String(danger);
+    appConfirmPreviousFocus = document.activeElement;
+    overlay.hidden = false;
+    overlay.setAttribute('aria-hidden', 'false');
+
+    return new Promise(resolve => {
+        appConfirmResolver = resolve;
+        window.requestAnimationFrame(() => $('appConfirmCancel').focus());
+    });
+}
+
+$('appConfirmCancel').addEventListener('click', () => closeAppConfirmation(false));
+$('appConfirmAccept').addEventListener('click', () => closeAppConfirmation(true));
+$('appConfirmOverlay').addEventListener('click', event => {
+    if (event.target === $('appConfirmOverlay')) closeAppConfirmation(false);
+});
+$('appConfirmOverlay').addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeAppConfirmation(false);
+        return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = [$('appConfirmCancel'), $('appConfirmAccept')];
+    const currentIndex = focusable.indexOf(document.activeElement);
+    if (event.shiftKey && currentIndex <= 0) {
+        event.preventDefault();
+        focusable[focusable.length - 1].focus();
+    } else if (!event.shiftKey && currentIndex === focusable.length - 1) {
+        event.preventDefault();
+        focusable[0].focus();
+    }
+});
+
+async function deleteSelectedProfile() {
+    try {
+        const profiles = readProfileRecords();
+        const profile = selectedProfileRecord(profiles);
+        if (!profile) {
+            setProfileStatus('Select a profile to delete.', 'error');
+            return;
+        }
+
+        const safeName = normalizeProfileName(profile.name) || 'this profile';
+        const confirmed = await requestAppConfirmation({
+            title: 'Delete profile?',
+            message: `Only the locally saved settings in “${safeName}” will be removed. Your current on-screen settings and every other profile will remain.`,
+            confirmLabel: 'Delete Profile'
+        });
+        if (!confirmed) return;
+
+        // Read again after the dialog so a change from another tab is not overwritten.
+        const latestProfiles = readProfileRecords();
+        writeProfileRecords(latestProfiles.filter(item => item.id !== profile.id));
+        $('profileName').value = '';
+        refreshProfileSelect();
+        setProfileStatus(`Deleted “${safeName}”.`, 'success');
+    } catch (error) {
+        setProfileStatus(error.message || 'The selected profile could not be deleted.', 'error');
+    }
+}
+
+function deleteIndexedDatabase(name) {
+    return new Promise(resolve => {
+        const request = window.indexedDB.deleteDatabase(name);
+        request.onsuccess = () => resolve(true);
+        request.onerror = () => resolve(false);
+        request.onblocked = () => resolve(false);
+    });
+}
+
+async function clearAllGazeLabData() {
+    const confirmed = await requestAppConfirmation({
+        title: 'Clear all GazeLab data?',
+        message: 'This removes every saved profile and any other GazeLab-owned local data for this site. It will not affect files, browser history, other websites, or unrelated browser data.',
+        confirmLabel: 'Clear GazeLab Data'
+    });
+    if (!confirmed) return;
+
+    let fullyCleared = true;
+    try {
+        for (let index = window.localStorage.length - 1; index >= 0; index--) {
+            const key = window.localStorage.key(index);
+            if (key && key.startsWith(GAZELAB_STORAGE_PREFIX)) window.localStorage.removeItem(key);
+        }
+        for (let index = window.sessionStorage.length - 1; index >= 0; index--) {
+            const key = window.sessionStorage.key(index);
+            if (key && key.startsWith(GAZELAB_STORAGE_PREFIX)) window.sessionStorage.removeItem(key);
+        }
+    } catch (error) {
+        fullyCleared = false;
+    }
+
+    if ('caches' in window) {
+        try {
+            const cacheNames = await window.caches.keys();
+            const results = await Promise.all(cacheNames
+                .filter(name => name.startsWith('gazelab-'))
+                .map(name => window.caches.delete(name)));
+            if (results.some(result => !result)) fullyCleared = false;
+        } catch (error) {
+            fullyCleared = false;
+        }
+    }
+
+    if (window.indexedDB && typeof window.indexedDB.databases === 'function') {
+        try {
+            const databases = await window.indexedDB.databases();
+            const names = databases
+                .map(database => database.name)
+                .filter(name => typeof name === 'string' && name.toLowerCase().startsWith('gazelab'));
+            const results = await Promise.all(names.map(deleteIndexedDatabase));
+            if (results.some(result => !result)) fullyCleared = false;
+        } catch (error) {
+            fullyCleared = false;
+        }
+    }
+
+    $('profileName').value = '';
+    refreshProfileSelect();
+    setProfileStatus(
+        fullyCleared ? 'All locally stored GazeLab data was cleared.' : 'Profiles were cleared, but some browser-managed data could not be removed.',
+        fullyCleared ? 'success' : 'error'
+    );
+}
+
+$('profileSaveButton').addEventListener('click', saveCurrentProfile);
+$('profileLoadButton').addEventListener('click', loadSelectedProfile);
+$('profileDeleteButton').addEventListener('click', deleteSelectedProfile);
+$('profileClearButton').addEventListener('click', clearAllGazeLabData);
+$('profileSelect').addEventListener('change', () => {
+    try {
+        const profile = selectedProfileRecord(readProfileRecords());
+        if (profile) $('profileName').value = normalizeProfileName(profile.name);
+    } catch (error) {
+        setProfileStatus(error.message || 'Saved profiles could not be read.', 'error');
+    }
+    updateProfileButtons();
+});
+$('profileName').addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        saveCurrentProfile();
+    }
+});
+window.addEventListener('storage', event => {
+    if (event.key === PROFILE_STORAGE_KEY) {
+        refreshProfileSelect();
+        setProfileStatus('The saved profile list changed in another tab.');
+    }
+});
+refreshProfileSelect();
     
 // ==============================
 // Time Formatting Utility Functions
@@ -953,8 +2121,6 @@ function formatTimeHMS(seconds) {
 }
 
 // Converts seconds to MM:SS format (round timer)
-// Uses ceil so a countdown shows the full duration at the start (e.g. 30, not 29)
-// and only ticks down when the remaining whole second actually elapses
 function formatTimeMS(seconds) {
     let total = Math.max(0, Math.ceil(seconds));
     let mins = Math.floor(total / 60);
@@ -962,6 +2128,38 @@ function formatTimeMS(seconds) {
     return (mins < 10 ? "0" : "") + mins + ":" +
              (secs < 10 ? "0" : "") + secs;
 }
+
+// Measures the actual requestAnimationFrame cadence over one second samples
+// Long gaps are discarded
+function updateFPS(deltaTime) {
+    if (!fpsDisplay) return;
+
+    if (deltaTime <= 0 || deltaTime > 0.25) {
+        fpsSampleFrames = 0;
+        fpsSampleTime = 0;
+        fpsDisplay.innerText = '--';
+        return;
+    }
+
+    fpsSampleFrames += 1;
+    fpsSampleTime += deltaTime;
+    if (fpsSampleTime >= 1) {
+        fpsDisplay.innerText = Math.round(fpsSampleFrames / fpsSampleTime);
+        checkForDisplayChange();
+        fpsSampleFrames = 0;
+        fpsSampleTime = 0;
+    }
+}
+
+// Pause only when this document is no longer visible (another tab or minimized)
+document.addEventListener('visibilitychange', () => {
+    lastTime = null;
+    fpsSampleFrames = 0;
+    fpsSampleTime = 0;
+    if (document.hidden && fpsDisplay) {
+        fpsDisplay.innerText = '--';
+    }
+});
     
 // ==============================
 // Timer Update Logic
@@ -969,12 +2167,34 @@ function formatTimeMS(seconds) {
 // ==============================
 // Updates round and flash timers, handles round transitions, and updates UI
 function updateTimers(deltaTime) {
-    elapsedTime += deltaTime;
+    if (!(isMeditationMode && meditationSessionState === 'complete')) {
+        elapsedTime += deltaTime;
+    }
     // ABC mode is a continuous free session  no round countdown / auto-advance
     if (isABCMode) {
         document.getElementById('elapsedTimeDisplay').innerText = formatTimeHMS(elapsedTime);
         return;
     }
+
+    // Meditation ends and movement performs its own ease out
+    if (isMeditationMode) {
+        if (meditationSessionState === 'running') {
+            roundTimeRemaining = Math.max(0, roundTimeRemaining - deltaTime);
+            if (roundTimeRemaining <= 0) {
+                meditationSessionState = 'ending';
+                meditationEndingElapsed = 0;
+                flashTimeRemaining = 0;
+            }
+        } else {
+            roundTimeRemaining = 0;
+        }
+
+        document.body.style.backgroundColor = backgroundColor;
+        document.getElementById('elapsedTimeDisplay').innerText = formatTimeHMS(elapsedTime);
+        document.getElementById('roundTimeDisplay').innerText = formatTimeMS(roundTimeRemaining);
+        return;
+    }
+
     roundTimeRemaining -= deltaTime;
 
     // End of round handling
@@ -1027,10 +2247,13 @@ function setupLevel1() {
 // Sets up level 2 (spiral movement)
 function setupLevel2() {
     spiralScale = 0.85 + Math.random() * 0.3; // Randomize spiral size
+    spiralTurns = SPIRAL_MIN_TURNS + Math.random() * (SPIRAL_MAX_TURNS - SPIRAL_MIN_TURNS);
     spiralProgress = 0; // Reset spiral progress
+    spiralDistance = 0;
     spiralForward = true; // Start spiral forward
 
     spiralRotation = Math.random() * 2 * Math.PI;
+    rebuildSpiralArcLookup();
     spawnDelay = 0.2;
     }
 
@@ -1040,9 +2263,101 @@ function setupLevel3() {
     resetFig8(); // re rolls center, orientation, size, direction, spawn phase
 }
 
+function normalizeAngle(angle) {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function turnAngleToward(current, target, maxStep) {
+    const difference = normalizeAngle(target - current);
+    return current + Math.max(-maxStep, Math.min(maxStep, difference));
+}
+
+function randomMeditationTurnDelay() {
+    return 5 + Math.random() * 4;
+}
+
+function setupMeditationMotion() {
+    const marginX = Math.max(ballRadius + 20, canvas.width * 0.2);
+    const marginY = Math.max(ballRadius + 20, canvas.height * 0.2);
+    const usableWidth = Math.max(0, canvas.width - marginX * 2);
+    const usableHeight = Math.max(0, canvas.height - marginY * 2);
+
+    pos.x = marginX + Math.random() * usableWidth;
+    pos.y = marginY + Math.random() * usableHeight;
+    const heading = Math.random() * Math.PI * 2;
+    meditationMotionState = {
+        heading,
+        targetHeading: heading + (Math.random() * 2 - 1) * 0.45,
+        turnTimer: randomMeditationTurnDelay()
+    };
+}
+
+function updateMeditationMotion(currentSpeed, deltaTime) {
+    if (meditationSessionState === 'complete') return;
+    if (!meditationMotionState) setupMeditationMotion();
+
+    let speedMultiplier = 1;
+    if (meditationSessionState === 'ending') {
+        meditationEndingElapsed += deltaTime;
+        const progress = Math.min(1, meditationEndingElapsed / MEDITATION_END_DURATION);
+        const smoothProgress = progress * progress * (3 - 2 * progress);
+        speedMultiplier = 1 - smoothProgress;
+        if (progress >= 1) {
+            meditationSessionState = 'complete';
+            setMeditationCompletionVisible(true);
+            return;
+        }
+    } else if (meditationSessionState === 'running' && meditationStartingElapsed < MEDITATION_START_DURATION) {
+        meditationStartingElapsed = Math.min(MEDITATION_START_DURATION, meditationStartingElapsed + deltaTime);
+        speedMultiplier = smoothstep01(meditationStartingElapsed / MEDITATION_START_DURATION);
+    }
+
+    const state = meditationMotionState;
+    state.turnTimer -= deltaTime;
+    if (state.turnTimer <= 0 && meditationSessionState === 'running') {
+        state.targetHeading = state.heading + (Math.random() * 2 - 1) * 0.7;
+        state.turnTimer = randomMeditationTurnDelay();
+    }
+
+    const minDimension = Math.min(canvas.width, canvas.height);
+    const margin = Math.max(ballRadius + 20, minDimension * 0.12);
+    const minX = margin;
+    const maxX = Math.max(minX, canvas.width - margin);
+    const minY = margin;
+    const maxY = Math.max(minY, canvas.height - margin);
+    const lookAheadDistance = Math.max(minDimension * 0.16, currentSpeed * 4);
+    const predictedX = pos.x + Math.cos(state.heading) * lookAheadDistance;
+    const predictedY = pos.y + Math.sin(state.heading) * lookAheadDistance;
+    const approachingBoundary = predictedX < minX || predictedX > maxX ||
+        predictedY < minY || predictedY > maxY;
+
+    if (approachingBoundary) {
+        state.targetHeading = Math.atan2(canvas.height / 2 - pos.y, canvas.width / 2 - pos.x);
+        state.turnTimer = Math.min(state.turnTimer, 1.5);
+    }
+
+    const turnRate = approachingBoundary
+        ? MEDITATION_BOUNDARY_TURN_RATE
+        : MEDITATION_NORMAL_TURN_RATE;
+    state.heading = turnAngleToward(state.heading, state.targetHeading, turnRate * deltaTime);
+
+    const distance = Math.max(0, currentSpeed) * speedMultiplier * deltaTime;
+    pos.x += Math.cos(state.heading) * distance;
+    pos.y += Math.sin(state.heading) * distance;
+
+    // Safety clamp for unusually or suspiciously small windows or a resize during the session
+    pos.x = Math.max(ballRadius, Math.min(canvas.width - ballRadius, pos.x));
+    pos.y = Math.max(ballRadius, Math.min(canvas.height - ballRadius, pos.y));
+}
+
 // Sets up level 4 (advanced bounce)
 // Randomizes position and velocity for bouncing movement
 function setupLevel4() {
+    if (isMeditationMode) {
+        setupMeditationMotion();
+        return;
+    }
+
     pos.x = Math.random() * canvas.width;
     pos.y = Math.random() * canvas.height;
     let angle = Math.random() * 2 * Math.PI;
@@ -1055,7 +2370,6 @@ function setupLevel4() {
 // Sets up level 5 (clock movement)
 // Ball starts at the center and sets a random clock hand target
 // Tracks last hour and repeat count
-defaultLastHour7 = 0; // fallback for first run
 let lastHour7 = null;
 let repeatHour7Count = 0;
 
@@ -1110,7 +2424,6 @@ function setupLevel6() {
     peekState = {
         phase: "outgoing",  // Current animation phase
         progress: 0,  // Animation progress
-        isFake: Math.random() < 0.2, // 20% chance to be a fake peek
         side: Math.random() < 0.5 ? 'left' : 'right', // Random side
         heightOffset: (Math.random() < 0.5 ? -1 : 1) * 50, // Random vertical offset
         maxOffset: peekDistance  // Maximum peek distance
@@ -1123,7 +2436,7 @@ function setupLevel6() {
 }
 
 // ==============================
-// Level 9: Circular Orbit
+// Level 7: Circular Orbit
 // Part of: Level system, Initialization logic
 // ==============================
 const circleSizeTiers = [0.12, 0.22, 0.34]; // small / medium / large, as fraction of min screen dim
@@ -1166,7 +2479,7 @@ function setupLevel7() {
 }
 
 // ==============================
-// Level 10: Door Peek
+// Level 8: Door Peek
 // Part of: Level system
 // ==============================
 const DOOR_PILLAR_HEIGHT_FRAC = 0.6; // pillar height as fraction of screen height
@@ -1175,9 +2488,9 @@ const DOOR_GAP_MAX_FRAC = 0.35;      // max gap as fraction of screen width
 const DOOR_DRIFT_SPEED = 0.75;       // radians/sec of the gap oscillation
 
 // Largest radius the target can be DRAWN at, used to size pillars and clamp
-// the hidden Y so the target never pokes out the top/bottom or sides.
-// In 3D depth mode the drawn radius swings up to (1 + depthGrowPoints/sizePercent)x
-// the true ballRadius; we size the concealment to that worst case.
+// the hidden Y so the target never pokes out the top/bottom or sides
+// In 3D depth mode the drawn radius swings up to (1 + depthGrowPoints/sizePercent) x the true ballRadius
+// the concealment sized to that worst case
 function doorConcealRadius() {
     const depthMax = is3DMode ? (1 + depthGrowPoints / sizePercent) : 1;
     return ballRadius * depthMax;
@@ -1190,8 +2503,8 @@ function doorPillars() {
     // Gap oscillates smoothly between min and max
     const gapFrac = DOOR_GAP_MIN_FRAC + (DOOR_GAP_MAX_FRAC - DOOR_GAP_MIN_FRAC) * (0.5 + 0.5 * Math.sin(t));
     const gap = w * gapFrac;
-    // Use the depth-aware drawn radius so the pillar still hides the target
-    // when 3D depth mode inflates the drawn size beyond the true ballRadius.
+    // Use the depth aware drawn radius so the pillar still hides the target
+    // when 3D depth mode inflates the drawn size beyond the true ballRadius
     const concealR = doorConcealRadius();
     const pillarW = Math.max(concealR * 2 + 40, 90); // wide enough to fully hide target
     const pillarH = h * DOOR_PILLAR_HEIGHT_FRAC;
@@ -1214,7 +2527,7 @@ function setupLevel8() {
     const h = canvas.height;
     const pillarH = h * DOOR_PILLAR_HEIGHT_FRAC;
     const top = (h - pillarH) / 2;
-    // Random height within the pillar's vertical span (depth-aware margin)
+    // Random height within the pillar's vertical span (depth aware margin)
     const margin = doorConcealRadius() + 10;
     const spawnY = top + margin + Math.random() * (pillarH - 2 * margin);
 
@@ -1234,7 +2547,7 @@ function setupLevel8() {
 }
 
 // ==============================
-// Level 11: Recursive Star setup
+// Level 9: Recursive Star setup
 // ==============================
 function starArmVector(armIndex, radius) {
     // Clock angle: arm 0 points up (-90deg), increasing clockwise
@@ -1274,7 +2587,8 @@ function setupLevel9() {
         offsets: buildStarJourney(), // waypoints relative to drifting center
         leg: 0,        // current segment index (0..2 outward, then reverses)
         dir: 1,        // 1 = outward through waypoints, -1 = back to center
-        segProgress: 0 // 0..1 progress along the current segment
+        segProgress: 0, // 0..1 progress along the current segment
+        pauseRemaining: 0 // rhythmic pause at each waypoint
     };
     const c = starCenter();
     pos.x = c.x + starState.offsets[0].x;
@@ -1382,10 +2696,12 @@ function toggleMeditationMode() {
     // Reset breathing overlay state when toggling meditation mode
     breathPhaseIndex = 0;
     breathTimer = 0;
+    setMeditationCompletionVisible(false);
     const btn = $('meditationToggle');
     isMeditationMode = !isMeditationMode;
+    updateColorCycleControls();
 
-    // Show/hide advanced level rows for meditation mode (bounce only -> level 4, idx 3)
+    // Show/hide advanced level rows for meditation mode (bounce only -> level 4, it's not bouncing anymore tho)
     const allLevelRows = document.querySelectorAll('.level-speed-row');
     allLevelRows.forEach((row, idx) => {
       if (isMeditationMode) {
@@ -1400,15 +2716,13 @@ function toggleMeditationMode() {
         b.style.display = isMeditationMode ? 'none' : '';
     });
 
-    // Scale meditation speeds for current screen type
+    // Scale meditation speeds for the current display
     if (isMeditationMode) {
-      meditationSpeedsScaled = meditationSpeeds.map(s => parseFloat((s * resolutionScale).toFixed(2)));
+      meditationSpeedsScaled = scaleReferenceSpeeds(meditationSpeeds);
     }
 
-    const screenTypeSelect = document.getElementById('screenTypeSelect');
     const tierSelect = document.getElementById('tierSelect');
     const subLevelInput = document.getElementById('subLevelInput');
-    screenTypeSelect.disabled = isMeditationMode;
     tierSelect.disabled = isMeditationMode;
     subLevelInput.disabled = isMeditationMode;
 
@@ -1417,7 +2731,7 @@ function toggleMeditationMode() {
         btn.classList.add('active');
         btn.textContent = "Exit Meditation Mode";
         // Save all current user settings for exit phase
-        savedSpeeds = [...levelSpeeds];
+        savedReferenceSpeeds = [...referenceLevelSpeeds];
         savedColors = {
             bg: $('bgColor').value,
             ball: $('ballColor').value,
@@ -1452,8 +2766,8 @@ function toggleMeditationMode() {
         $('horizontalStripesToggle').checked = false;
         $('solidStripesToggle').checked = false;
 
-        // Apply meditation specific settings:
-        // fixed speeds & colors, fixed size, 5 min round (editable), flash cue on
+        // Apply meditation specific settings: fixed speed/colors/size and a
+        // five minute round that ends gently instead of flashing or restarting
         levelSpeeds = [...meditationSpeedsScaled];
         speedInputs.forEach((input, i) => {
             input.value = meditationSpeedsScaled[i];
@@ -1464,11 +2778,10 @@ function toggleMeditationMode() {
         $('dotColor').value = '#ffdea3';
         $('bgColor').value = '#4b3d92';
         $('flashColor').value = '#aa7839';
-        $('autoNextToggle').checked = true;
+        $('autoNextToggle').checked = false;
         $('sizeInput').value = 100;
         $('roundDuration').value = 300; // 5 min default, user can rewrite
-        // Turn the flash cue ON so the round end is noticeable (toggle is "disable", so uncheck :)))
-        $('disableFlashToggle').checked = false;
+        $('disableFlashToggle').checked = true;
 
         // Update internal state variables to match meditation settings
         ballColor = $('ballColor').value;
@@ -1479,6 +2792,10 @@ function toggleMeditationMode() {
         sizePercent = 100;
         ballRadius = baseBallRadius * (sizePercent / 100);
         roundDuration = 300;
+        meditationSessionState = 'running';
+        meditationEndingElapsed = 0;
+        meditationStartingElapsed = MEDITATION_START_DURATION;
+        meditationMotionState = null;
 
         // Refresh the menu preview so it shows the meditation target (gold, size 100)
         if (typeof drawPreview === 'function') drawPreview();
@@ -1496,11 +2813,16 @@ function toggleMeditationMode() {
         // Exiting -> unhighlight button and restore label
         btn.classList.remove('active');
         btn.textContent = "Meditation Mode";
+        meditationSessionState = 'idle';
+        meditationEndingElapsed = 0;
+        meditationStartingElapsed = MEDITATION_START_DURATION;
+        meditationMotionState = null;
 
         // Restore all previously saved user settings
-        levelSpeeds = [...savedSpeeds];
+        referenceLevelSpeeds = [...savedReferenceSpeeds];
+        levelSpeeds = scaleReferenceSpeeds(referenceLevelSpeeds);
         speedInputs.forEach((input, i) => {
-        input.value = savedSpeeds[i];
+        input.value = levelSpeeds[i];
         input.disabled = false;
         });
         
@@ -1552,6 +2874,7 @@ function toggleMeditationMode() {
     // Sync speed and UI with current level
     speedPercent = levelSpeeds[level - 1];
     $('speedInput').value = speedPercent;
+    updateProfileButtons();
 }
 
 // ==============================
@@ -1586,6 +2909,7 @@ function toggleABCMode() {
         $('levelDisplay').innerText = "Level " + level;
         resetLevel(); // return to normal level movement
     }
+    updateProfileButtons();
 }
 
 // ==============================
@@ -1597,6 +2921,10 @@ function update(deltaTime) {
     // Keep ball radius in sync with sizePercent (UI)
     ballRadius = baseBallRadius * (sizePercent / 100);
 
+    // Color timing follows active simulation time, so pause/hidden-tab behavior
+    // stays consistent with target movement and the session timers
+    updateColorCycle(deltaTime);
+
     // Advance reading UI code timer (independent of level), respawns on expiry
     if (readingUIEnabled) {
         if (!readingUICode) rollReadingUICode();
@@ -1604,14 +2932,14 @@ function update(deltaTime) {
         if (readingUICode.timeLeft <= 0) rollReadingUICode();
     }
 
-    // Advance 3D depth oscillation (draw only effect), placed before any early
-    // returns so the depth keeps easing smoothly during spawn delays etc.
+    // Advance 3D depth oscillation (draw only effect)
+    // placed before any early returns so the depth keeps easing smoothly during spawn delays etc
     if (is3DMode) {
         depthT += depthSpeed * deltaTime;
         // Each direction capped by its room to the limit (so it never crosses)
         const up = Math.min(depthGrowPoints, SIZE_MAX - sizePercent);    // grow room
         const down = Math.min(depthShrinkPoints, sizePercent - SIZE_MIN); // shrink room
-        // Sine's positive half grows (toward viewer), negative half shrinks (away).
+        // Sine's positive half grows (toward viewer), negative half shrinks (away)
         const s = Math.sin(depthT);
         const pts = (s >= 0 ? s * up : s * down); // size points offset from home
         depthScale = 1 + pts / sizePercent;
@@ -1628,8 +2956,9 @@ function update(deltaTime) {
             strokeLen += Math.hypot(stroke[i].x - stroke[i - 1].x, stroke[i].y - stroke[i - 1].y);
         }
 
-        // Advance along the stroke at constant on screen speed (resolution scaled)
-        const abcSpeed = ABC_SPEED * resolutionScale;
+        // Advance at the native resolution equivalent speed, converted to the
+        // CSS pixel coordinate system used by the canvas
+        const abcSpeed = effectiveSpeedToCanvasSpeed(ABC_SPEED * resolutionScale);
         abcState.dist += abcSpeed * deltaTime * abcState.dir;
 
         if (abcState.dir === 1 && abcState.dist >= strokeLen) {
@@ -1637,7 +2966,7 @@ function update(deltaTime) {
             abcState.dist = strokeLen;
             abcState.dir = -1;
         } else if (abcState.dir === -1 && abcState.dist <= 0) {
-            // Back at stroke start -> next stroke, or next orientation,glyph
+            // Back at stroke start -> next stroke or next orientation, glyph
             abcState.dist = 0;
             abcState.dir = 1;
             if (abcState.strokeIndex < abcState.strokes.length - 1) {
@@ -1670,18 +2999,17 @@ function update(deltaTime) {
             d -= segLen;
         }
         if (!placed) { pos.x = pts[0].x; pos.y = pts[0].y; }
-        return; // ABC mode handles its own movement; skip normal level logic
+        return; // ABC mode handles its own movement, skip normal level logic
     }
 
-    // Handle spawn delay for spiral and advanced levels
-    // level 3/4/5 spawn logic
+    // Handle the brief spawn delay between spiral and figure eight patterns
     if ((level === 2 || level === 3) && spawnDelay > 0) {
         spawnDelay -= deltaTime;
         return; // Waits for spawn delay before updating position
     }
     
-    // Get the current movement speed (can be affected by level or mode)
-    let currentSpeed = speedPercent;
+    // The UI reports native display px/s, movement uses canvas/CSS pixels
+    const currentSpeed = effectiveSpeedToCanvasSpeed(speedPercent);
     
     // ==============================
     // Level 1: Axis Movement (merged horizontal/vertical)
@@ -1757,95 +3085,97 @@ function update(deltaTime) {
     // Part of: Movement logic
     // ==============================
     else if (level === 2) {
-        // Calculate spiral center and radii
-        let centerX = canvas.width / 2;
-        let centerY = canvas.height / 2;
-        let outerRadius = (Math.min(canvas.width, canvas.height) / 3) * spiralScale;
-        let innerRadius = ballRadius;
-        // Calculate spiral angle and position
-        let theta = (spiralCW ? 2 * Math.PI * spiralProgress : -2 * Math.PI * spiralProgress);
-        let totalAngle = theta + spiralRotation;
-        let radius = innerRadius + spiralProgress * (outerRadius - innerRadius);
-        pos.x = centerX + radius * Math.cos(totalAngle);
-        pos.y = centerY + radius * Math.sin(totalAngle);
-        
-        // Advance spiral progress based on speed and direction
-        let progressDelta = (currentSpeed / outerRadius) * deltaTime;
+        if (!spiralArcLookup) rebuildSpiralArcLookup();
+        const travelDistance = Math.max(0, currentSpeed) * deltaTime;
+
         if (spiralForward) {
-            spiralProgress += progressDelta;
-            if (spiralProgress >= 1) {
-                spiralProgress = 1;
+            spiralDistance += travelDistance;
+            if (spiralDistance >= spiralArcLookup.totalLength) {
+                const overshoot = spiralDistance - spiralArcLookup.totalLength;
+                spiralDistance = Math.max(0, spiralArcLookup.totalLength - overshoot);
                 spiralForward = false;
             }
         } else {
-            spiralProgress -= progressDelta;
-            if (spiralProgress <= 0) {
-                spiralProgress = 0;
-                // Randomize spiral for next run
-                spiralRotation = Math.random() * 2 * Math.PI;
+            spiralDistance -= travelDistance;
+            if (spiralDistance <= 0) {
+                // Keep the same starting angle so generating the next spiral
+                // cannot teleport the target across the inner circle
                 spiralScale = 0.85 + Math.random() * 0.3;
+                spiralTurns = SPIRAL_MIN_TURNS + Math.random() * (SPIRAL_MAX_TURNS - SPIRAL_MIN_TURNS);
                 spiralForward = true;
                 spiralCW = !spiralCW;
+                spiralDistance = 0;
+                spiralProgress = 0;
+                rebuildSpiralArcLookup();
+                const start = spiralPointAt(0);
+                pos.x = start.x;
+                pos.y = start.y;
                 spawnDelay = 0.2; // Small pause between spirals
+                return;
             }
         }
+
+        spiralProgress = parameterAtArcDistance(spiralArcLookup, spiralDistance);
+        const spiralPoint = spiralPointAt(spiralProgress);
+        pos.x = spiralPoint.x;
+        pos.y = spiralPoint.y;
     }
     // ==============================
     // Level 3: Figure-8 Movement (any angle)
     // Part of: Movement logic
     // ==============================
     else if (level === 3) {
-        // Base figure-8 amplitude
-        let A = (Math.min(canvas.width, canvas.height) / 4) * fig8Scale;
-        // The 8 is planted at fig8Center (jittered near screen center)
-        let centerX = fig8Center.x;
-        let centerY = fig8Center.y;
-        // Phase = spawn offset + progress*direction. At fig8T = 0 the target is at the spawn point
-        // at fig8T = 2*PI it returns to it (loop complete)
-        let t = fig8Offset + (fig8T * fig8Mirror);
-        // Base (horizontal) figure-8 point, centered at origin
-        let bx = A * Math.sin(t);
-        let by = (A / 2) * Math.sin(2 * t);
-        // Rotate the whole 8 by fig8Angle (one of 6 clock hand orientations)
-        const ca = Math.cos(fig8Angle), sa = Math.sin(fig8Angle);
-        pos.x = centerX + bx * ca - by * sa;
-        pos.y = centerY + bx * sa + by * ca;
-        // Advance along the path
-        let tDelta = (currentSpeed / A) * deltaTime;
-        fig8T += tDelta;
-        // Completed a full loop (returned to the spawn phase)? 
-        // Carry the overshoot so the last frame's segment isn't skipped, then re roll
-        if (fig8T >= 2 * Math.PI) {
-            const carry = fig8T - 2 * Math.PI;
-            resetFig8();       // new center, angle, size, direction, spawn phase; sets fig8T = 0
-            fig8T = carry;     // re apply carry so no segment of the new 8 is lost
-            spawnDelay = 0.1;  // brief pause signaling the new shape
+        if (!fig8ArcLookup) rebuildFig8ArcLookup();
+
+        if (fig8ClosurePause > 0) {
+            fig8ClosurePause -= deltaTime;
+            if (fig8ClosurePause <= 0) resetFig8();
+            return;
         }
+
+        fig8Distance += Math.max(0, currentSpeed) * deltaTime;
+
+        if (fig8Distance >= fig8ArcLookup.totalLength) {
+            fig8Distance = fig8ArcLookup.totalLength;
+            fig8T = 2 * Math.PI;
+            const closurePoint = figureEightPointAt(fig8T);
+            pos.x = closurePoint.x;
+            pos.y = closurePoint.y;
+            fig8ClosurePause = FIG8_CLOSURE_HOLD;
+            return;
+        }
+
+        fig8T = parameterAtArcDistance(fig8ArcLookup, fig8Distance);
+        const fig8Point = figureEightPointAt(fig8T);
+        pos.x = fig8Point.x;
+        pos.y = fig8Point.y;
     }
     // ==============================
     // Level 4: Advanced Bounce
     // Part of: Movement logic
     // ==============================
     else if (level === 4) {
+        if (isMeditationMode) {
+            updateMeditationMotion(currentSpeed, deltaTime);
+            return;
+        }
+
         // Random direction reversal but only when it's meaningful
-        // Disabled entirely in meditation mode (slow, effortless glide)
         // Otherwise: target must have traveled a minimum distance (speed independent)
-        // AND the time cooldown must have elapsed.
+        // AND the time cooldown must have elapsed
         // Distance is the hard gate so low speeds don't trigger flips after only a tiny move
-        if (!isMeditationMode) {
-            const currentTime = Date.now();
-            const minDist = Math.min(canvas.width, canvas.height) * directionChangeMinDistFraction;
-            if (distanceSinceDirectionChange >= minDist &&
-                currentTime - lastDirectionChangeTime >= directionChangeCooldown) {
-                if (Math.random() < directionChangeChance) {
-                    vel.x = -vel.x;
-                    vel.y = -vel.y;
-                }
-                // Reset both gates after a check, whether or not it flipped,
-                // so the next opportunity again requires fresh distance + time
-                lastDirectionChangeTime = currentTime;
-                distanceSinceDirectionChange = 0;
+        const currentTime = Date.now();
+        const minDist = Math.min(canvas.width, canvas.height) * directionChangeMinDistFraction;
+        if (distanceSinceDirectionChange >= minDist &&
+            currentTime - lastDirectionChangeTime >= directionChangeCooldown) {
+            if (Math.random() < directionChangeChance) {
+                vel.x = -vel.x;
+                vel.y = -vel.y;
             }
+            // Reset both gates after a check, whether or not it flipped,
+            // so the next opportunity again requires fresh distance + time
+            lastDirectionChangeTime = currentTime;
+            distanceSinceDirectionChange = 0;
         }
         
         // Move according to velocity vector (bouncing logic)
@@ -1952,7 +3282,7 @@ function update(deltaTime) {
             let dx = destX - pos.x;
             let dy = destY - pos.y;
             let dist = Math.sqrt(dx * dx + dy * dy);
-            let step = speedPercent * deltaTime;
+            let step = currentSpeed * deltaTime;
             if (dist <= step) {
                 // Snap to destination, switch to incoming phase
                 pos.x = destX;
@@ -1969,7 +3299,7 @@ function update(deltaTime) {
             let dx = center.x - pos.x;
             let dy = center.y - pos.y;
             let dist = Math.sqrt(dx * dx + dy * dy);
-            let step = speedPercent * deltaTime;
+            let step = currentSpeed * deltaTime;
             if (dist <= step) {
                 // Snap to center, randomize next clock hand target
                 pos.x = center.x;
@@ -2035,7 +3365,7 @@ function update(deltaTime) {
 
         // Move peek target by updating progress
         // Movement in pixels per frame
-        const movementPx = speedPercent * deltaTime;
+        const movementPx = currentSpeed * deltaTime;
         peekState.progress += direction * movementPx / peekState.maxOffset;
 
         // Clamp progress between 0 and 1
@@ -2109,10 +3439,10 @@ function update(deltaTime) {
         const toCenter   = doorsState.side === 'left' ? p.right.centerX : p.left.centerX;
 
         if (!doorsState.moving) {
-            // Hidden behind a pillar: brief pause, then start a crossing.
+            // Hidden behind a pillar: brief pause, then start a crossing
             // Clamp fromY against the current pillar span first, so a stale Y
             // (e.g. after a window resize shrank the pillar) can't leave the
-            // target poking past the top/bottom edge while "hidden".
+            // target poking past the top/bottom edge while "hidden"
             const margin = doorConcealRadius() + 10;
             doorsState.fromY = Math.max(p.top + margin, Math.min(p.top + p.pillarH - margin, doorsState.fromY));
             doorsState.hideTimer -= deltaTime;
@@ -2131,16 +3461,28 @@ function update(deltaTime) {
                 doorsState.progress = 0;
             }
         } else {
-            // Crossing the gap from one pillar center to the other
-            const spanPx = Math.abs(toCenter - fromCenter);
-            const step = (currentSpeed * deltaTime) / Math.max(spanPx, 1);
-            doorsState.progress += step;
-            if (doorsState.progress >= 1) {
+            // Measure the full curved crossing, including its eased vertical component
+            // The lookup is refreshed because the pillars continue
+            // drifting while the target crosses between them
+            const doorPointAt = progress => {
+                const ease = 0.5 - 0.5 * Math.cos(progress * Math.PI);
+                return {
+                    x: fromCenter + (toCenter - fromCenter) * progress,
+                    y: doorsState.fromY + (doorsState.toY - doorsState.fromY) * ease
+                };
+            };
+            const doorArcLookup = buildArcLengthLookup(doorPointAt, 1, DOOR_ARC_SAMPLES);
+            const currentDistance = arcDistanceAtParameter(doorArcLookup, doorsState.progress);
+            const nextDistance = currentDistance + Math.max(0, currentSpeed) * deltaTime;
+
+            if (nextDistance >= doorArcLookup.totalLength) {
                 // Arrived fully hidden behind the far pillar
                 doorsState.progress = 1;
                 doorsState.moving = false;
                 doorsState.hideTimer = 0.4;
                 doorsState.fromY = doorsState.toY;
+                pos.x = toCenter;
+                pos.y = doorsState.toY;
                 // 50% chance to return the same way, otherwise new height
                 if (Math.random() < 0.5) {
                     doorsState.side = (doorsState.side === 'left') ? 'right' : 'left';
@@ -2154,12 +3496,10 @@ function update(deltaTime) {
                     doorsState.fromY = top + margin + Math.random() * (pillarH - 2 * margin);
                 }
             } else {
-                // Interpolate position across the gap with a smooth vertical drift
-                // Horizontal: linear, vertical: ease so the path gently arcs
-                const tt = doorsState.progress;
-                const ease = 0.5 - 0.5 * Math.cos(tt * Math.PI); // smooth-ish
-                pos.x = fromCenter + (toCenter - fromCenter) * tt;
-                pos.y = doorsState.fromY + (doorsState.toY - doorsState.fromY) * ease;
+                doorsState.progress = parameterAtArcDistance(doorArcLookup, nextDistance);
+                const point = doorPointAt(doorsState.progress);
+                pos.x = point.x;
+                pos.y = point.y;
             }
         }
     }
@@ -2173,44 +3513,64 @@ function update(deltaTime) {
         // Drift the whole structure slowly around screen center
         starDriftT += STAR_DRIFT_SPEED * deltaTime;
         const c = starCenter();
-        const offs = starState.offsets;
+        // The selected speed is the outer leg reference speed
+        // Shorter inner legs intentionally use lower multipliers so they remain visible
+        // instead of seeming to accelerate and pauses are derived from the outer leg travel time,
+        // so manual/tier speed changes affect the entire rhythm proportionally
+        let remainingTime = deltaTime;
+        let safety = 0;
+        while (remainingTime > 0 && safety++ < 64) {
+            if (starState.pauseRemaining > 0) {
+                const pauseStep = Math.min(remainingTime, starState.pauseRemaining);
+                starState.pauseRemaining -= pauseStep;
+                remainingTime -= pauseStep;
+                if (remainingTime <= 0) break;
+            }
 
-        // Advance progress, to stop the small inner legs from whipping past in a few frames,
-        // each leg advances at a rate that makes shorter legs tak proportionally less time
-        // blend speed with per leg minimum duration so inner legs stay readable
-        const a = offs[starState.leg];
-        const b = offs[starState.leg + 1];
-        const from = (starState.dir === 1) ? a : b;
-        const to   = (starState.dir === 1) ? b : a;
-        const fromX = c.x + from.x, fromY = c.y + from.y;
-        const toX = c.x + to.x, toY = c.y + to.y;
-        const segLen = Math.hypot(toX - fromX, toY - fromY);
+            const activeOffsets = starState.offsets;
+            const a = activeOffsets[starState.leg];
+            const b = activeOffsets[starState.leg + 1];
+            const segLen = Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1);
+            const legMultiplier = STAR_LEG_SPEED_MULTIPLIERS[starState.leg] || 1;
+            const segmentSpeed = Math.max(currentSpeed, 0) * legMultiplier;
+            if (segmentSpeed <= 0) break;
 
-        // Effective traversal time: constant speed time, but clamped to a minimum
-        // so short legs don't flash by, rate = 1 / time.
-        const constSpeedTime = segLen / Math.max(currentSpeed, 1);
-        const legTime = Math.max(constSpeedTime, STAR_MIN_LEG_TIME);
-        starState.segProgress += deltaTime / legTime;
+            const distanceLeft = segLen * (1 - starState.segProgress);
+            const timeToEnd = distanceLeft / segmentSpeed;
+            if (remainingTime < timeToEnd) {
+                starState.segProgress += (segmentSpeed * remainingTime) / segLen;
+                remainingTime = 0;
+                break;
+            }
 
-        // Carry leftover progress across boundaries so position never jumps
-        while (starState.segProgress >= 1) {
-            const overshoot = starState.segProgress - 1;
-            starState.segProgress = overshoot;
+            // Finish this leg, move the state to the next leg, then pause there
+            remainingTime -= timeToEnd;
+            starState.segProgress = 0;
+            let isTurnaround = false;
             if (starState.dir === 1) {
-                if (starState.leg < offs.length - 2) {
+                if (starState.leg < activeOffsets.length - 2) {
                     starState.leg += 1;
                 } else {
                     starState.dir = -1;
+                    isTurnaround = true;
                 }
+            } else if (starState.leg > 0) {
+                starState.leg -= 1;
             } else {
-                if (starState.leg > 0) {
-                    starState.leg -= 1;
-                } else {
-                    starState.offsets = buildStarJourney();
-                    starState.leg = 0;
-                    starState.dir = 1;
-                }
+                starState.offsets = buildStarJourney();
+                starState.leg = 0;
+                starState.dir = 1;
+                isTurnaround = true;
             }
+
+            const outerOffsets = starState.offsets;
+            const outerLegLen = Math.max(Math.hypot(
+                outerOffsets[1].x - outerOffsets[0].x,
+                outerOffsets[1].y - outerOffsets[0].y
+            ), 1);
+            const outerLegTime = outerLegLen / Math.max(currentSpeed, 1);
+            const pauseRatio = isTurnaround ? STAR_TURN_PAUSE_RATIO : STAR_INTER_LEG_PAUSE_RATIO;
+            starState.pauseRemaining = outerLegTime * pauseRatio;
         }
 
         // recalculate current segment endpoints (leg/dir may have changed) and place
@@ -2234,6 +3594,9 @@ function update(deltaTime) {
 function draw() {
     // Clear the entire canvas before drawing
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Keep the breathing guide visually behind the target so tracking remains clear
+    drawBreathingHalo();
     
     // Draw main target (ball)
     // depthScale fakes z-axis distance (draw only; true ballRadius unchanged)
@@ -2320,8 +3683,6 @@ function draw() {
         ctx.font = `bold ${readingUICode.fontSize}px monospace`;
         ctx.fillStyle = contrastColor(backgroundColor);
         ctx.textBaseline = 'middle';
-        const metrics = ctx.measureText(readingUICode.text);
-        const tw = metrics.width;
         const th = readingUICode.fontSize;
         let x, y;
         switch (readingUICode.corner) {
@@ -2343,24 +3704,33 @@ function draw() {
 function loop(timestamp) {
     // Initialize lastTime on first call
     if (!lastTime) lastTime = timestamp;
-    // Calculate time since last frame (in seconds)
-    let deltaTime = (timestamp - lastTime) / 1000;
+    // Keep raw frame time for an honest FPS measurement
+    // Movement and timers use a protected value so stalls cannot teleport the target through its path
+    const rawDeltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp; // always advance, so unpausing doesn't cause a time jump
+    updateFPS(rawDeltaTime); // stays active while the movement itself is paused
 
-    if (!isPaused) {
+    const simulationDelta = rawDeltaTime > INTERRUPTION_DELTA
+        ? 0
+        : Math.min(rawDeltaTime, MAX_SIMULATION_DELTA);
+
+    if (!isPaused && !document.hidden) {
         // Update all timers (round, overlays, etc.)
-        updateTimers(deltaTime);
+        updateTimers(simulationDelta);
         // Update game state (positions, logic, etc.)
-        update(deltaTime);
+        update(simulationDelta);
         // Update breathing overlay timer (if enabled)
-        updateBreathTimer(deltaTime);
+        updateBreathTimer(simulationDelta);
     }
     // Always draw so the frame stays visible (frozen while paused)
     draw();
-    drawBreathingOverlay();
+    drawBreathingLabel();
     // Schedule the next animation frame
     requestAnimationFrame(loop);
 }
+
+// Detect and apply the initial display scale before the first frame.
+updateScreenScaling();
 
 // Start the game loop
 requestAnimationFrame(loop);
